@@ -4,7 +4,7 @@
 
 Memory Layer is a reusable memory infrastructure package for applications using LLMs. It is not an agent framework, a chatbot, a Context Builder, or a document RAG platform.
 
-Milestone 1 established configuration, provider client construction, PostgreSQL connectivity, and durable relational models. Milestone 2 adds deterministic candidate-memory identity. Milestone 3 adds bounded LLM extraction into validated `CandidateMemory` objects; persistence and retrieval remain unimplemented.
+Milestone 1 established configuration, provider client construction, PostgreSQL connectivity, and durable relational models. Milestone 2 adds deterministic candidate-memory identity. Milestone 3 adds bounded LLM extraction into validated `CandidateMemory` objects. Milestone 4 adds validated, deterministic PostgreSQL writes and temporal supersession; retrieval remains unimplemented.
 
 ## Current boundary
 
@@ -14,7 +14,7 @@ An application explicitly calls the memory layer. The package does not own appli
 Application
     |
 Memory Layer
-    |- Write Pipeline (planned)
+    |- Write Pipeline
     `- Retrieval Pipeline (planned)
 ```
 
@@ -51,7 +51,7 @@ Predicate Resolver
       fact_key = NULL
 ```
 
-`fact_key` is not primarily a search string. It is the stable identity of a logical fact slot, enabling later exact structured lookup, duplicate detection, and update/supersession detection. Mutation and supersession behavior are not implemented in this milestone.
+`fact_key` is not primarily a search string. It is the stable identity of a logical fact slot, enabling exact structured lookup, duplicate detection, and deterministic supersession.
 
 Known predicates receive deterministic structured identity. Useful facts with unknown predicates remain valid open-world semantic memories with no fact key, so the registry never rejects knowledge merely because it does not recognize a slot.
 
@@ -77,25 +77,45 @@ The extractor uses the existing lazy OpenAI-compatible chat client with an ordin
 
 Malformed JSON, empty model content, provider failures, and schema violations raise an explicit extraction error; malformed output is never converted into a valid candidate.
 
-## Planned write architecture
+## Implemented write lifecycle
 
-The following is a design target, not an implemented feature:
+`write_memories()` accepts a batch of validated candidates and owns one PostgreSQL commit or rollback for the batch.
 
 ```text
+Target interaction
+      |
+LLM extraction
+      |
 CandidateMemory
-    |
-predicate and fact-key identity
-    |
-write validation                 <- later
-    |
-existing-memory resolution       <- later
-    |
-ADD / UPDATE / SUPERSEDE / NOOP  <- later
-    |
-PostgreSQL                       <- later
+      |
+deterministic identity
+      |
+validated write lifecycle
+      |
+ADD / NOOP / SUPERSEDE
+      |
+PostgreSQL
 ```
 
-LLMs will make semantic judgments, while deterministic code will own validation and execution. Temporal fields already model memory history but no supersession behavior exists yet.
+The writer resolves the requested `user_external_id` to an existing user. An optional conversation must exist and belong to that user. Every supplied source message must exist, belong to the same user, and, when a conversation is supplied, belong to that conversation. User scope is included in every active-memory lookup.
+
+For a candidate with `subject_type = user`, deterministic application context supplies `User.external_id` as `subject_id`. Known predicates are canonicalized through the predicate registry and can produce a fact key. Unknown predicates remain open semantic memories: their persisted `predicate`, `value`, and `fact_key` are `NULL` while the original `memory_text` is retained.
+
+### Structured memory
+
+When `fact_key` is available, the writer performs an exact active-fact lookup in the user scope. The first fact is an ADD. A value equivalent under the shared deterministic value-identity normalization is a NOOP, and its source-message provenance is merged in first-seen order. A changed value for a single-valued predicate is a SUPERSEDE. Multi-valued predicates incorporate normalized value identity in the key, so different values coexist and repeating the same value is a NOOP.
+
+SUPERSEDE is not DELETE. The writer inserts the new active row, then marks the old row inactive with `valid_to` equal to the new row's `valid_from` and sets `superseded_by_id`. Both changes are part of the same transaction, so the old fact remains historically queryable.
+
+### Open semantic and episodic memory
+
+Open semantic memory has no fact key. It uses only exact normalized `memory_text` matching within the user scope: an exact duplicate is a NOOP and every other text is an ADD. Semantic duplicate and contradiction detection are intentionally deferred until richer retrieval exists.
+
+Episodic memory also has no fact key, but repeated text can describe distinct events. It is a NOOP only when both normalized text and the set of validated source message IDs match; otherwise it is added as another episode.
+
+### Trust boundary
+
+The LLM proposes `CandidateMemory`. Deterministic code owns user scope, conversation and provenance validation, predicate resolution, fact-key generation, active-memory lookup, mutation decisions, and transaction execution. The write path makes no LLM, embedding, FAISS, or retrieval call.
 
 ## Planned retrieval architecture
 

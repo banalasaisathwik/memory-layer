@@ -1,10 +1,10 @@
 # Memory Layer
 
-Memory Layer is a small, reusable foundation for applications that need durable, user-scoped long-term memory. It implements the Milestone 1 foundation (configuration, lazy OpenAI-compatible provider clients, a Neon/PostgreSQL connection layer, and the initial SQLAlchemy schema), Milestone 2 deterministic candidate-memory identity, and Milestone 3 bounded LLM extraction into validated candidates.
+Memory Layer is a small, reusable foundation for applications that need durable, user-scoped long-term memory. It implements the Milestone 1 foundation (configuration, lazy OpenAI-compatible provider clients, a Neon/PostgreSQL connection layer, and the initial SQLAlchemy schema), Milestone 2 deterministic candidate-memory identity, Milestone 3 bounded LLM extraction into validated candidates, and Milestone 4 validated PostgreSQL writes with temporal supersession.
 
 `extract_memories()` accepts one current user/assistant interaction and returns validated `CandidateMemory` proposals. It does not write to PostgreSQL, generate fact keys or canonical subject IDs, decide mutations, generate embeddings, or retrieve memories. Source message IDs remain application-owned provenance and are deterministically attached after model output is validated.
 
-Write lifecycle decisions, retrieval, embeddings generation, FAISS, and supersession behavior are deliberately not implemented yet.
+`write_memories()` validates the existing user, optional conversation, and message provenance before deterministically writing a batch. Known structured facts use exact scoped identity to ADD, NOOP, or SUPERSEDE while preserving historical rows. Open semantic memories use exact normalized-text deduplication only; retrieval, embeddings generation, FAISS, and semantic contradiction detection remain deliberately out of scope.
 
 ## Prerequisites
 

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum as SqlEnum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Enum as SqlEnum, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
@@ -105,7 +105,7 @@ class Memory(Base):
     fact_key: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
 
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    importance: Mapped[int] = mapped_column(Integer, default=0)
+    importance: Mapped[float] = mapped_column(Float, default=0)
 
     source_message_ids: Mapped[list[str]] = mapped_column(source_message_ids_type, default=list)
 
