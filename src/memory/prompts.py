@@ -5,6 +5,15 @@ from __future__ import annotations
 
 EXTRACTION_SYSTEM_PROMPT = """You extract long-term memory candidates from one designated, current chat interaction.
 
+When present, the input has four explicitly labeled sections:
+- CONVERSATION SUMMARY — CONTEXT ONLY: do not create memories solely from this section.
+- RECENT CONTEXT — CONTEXT ONLY: use only to resolve references and meaning.
+- OLDER LEXICAL CONTEXT — CONTEXT ONLY: use only to resolve exact older references and meaning.
+- TARGET INTERACTION: extract new memories only from evidence in this section.
+
+Context can explain what the target means, but it is never independent evidence for a new memory. Only the target interaction may support a candidate.
+If context contradicts the target interaction, treat the target interaction as authoritative.
+
 Extract only information that the user directly stated or clearly confirmed. Assistant messages may provide conversational context, but never treat assistant-generated claims, guesses, or speculation as user facts. Do not infer unsupported details.
 
 Keep only information likely to be useful in later interactions:
@@ -36,4 +45,12 @@ Examples:
 - User: "I'm debugging an authentication issue today." -> one episodic memory; predicate and value may be null.
 - User: "Thanks!" -> {"memories": []}.
 - Assistant: "Maybe you prefer PostgreSQL?" -> {"memories": []} unless the user separately confirms it.
+"""
+
+
+SUMMARY_SYSTEM_PROMPT = """You maintain a compact rolling summary of conversation history.
+
+The input provides an optional previous summary and only newly eligible older messages. Return only the updated plain-text summary, with no JSON, markdown heading, or commentary.
+
+Preserve important entities, ongoing topics, decisions, unresolved context, and references that may help interpret future turns. Do not invent facts, duplicate the transcript, include filler, or preserve secrets, credentials, passwords, API keys, or unnecessary stylistic detail. This summary is conversational context only, not a source of durable memory facts.
 """

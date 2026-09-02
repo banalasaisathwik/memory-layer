@@ -1,8 +1,8 @@
 # Memory Layer
 
-Memory Layer is a small, reusable foundation for applications that need durable, user-scoped long-term memory. It implements the Milestone 1 foundation (configuration, lazy OpenAI-compatible provider clients, a Neon/PostgreSQL connection layer, and the initial SQLAlchemy schema), Milestone 2 deterministic candidate-memory identity, Milestone 3 bounded LLM extraction into validated candidates, and Milestone 4 validated PostgreSQL writes with temporal supersession.
+Memory Layer is a small, reusable foundation for applications that need durable, user-scoped long-term memory. It implements the Milestone 1 foundation (configuration, lazy OpenAI-compatible provider clients, a Neon/PostgreSQL connection layer, and the initial SQLAlchemy schema), Milestone 2 deterministic candidate-memory identity, Milestone 3 bounded LLM extraction into validated candidates, Milestone 4 validated PostgreSQL writes with temporal supersession, and Milestone 5 bounded conversation context with rolling summaries and Alembic migrations.
 
-`extract_memories()` accepts one current user/assistant interaction and returns validated `CandidateMemory` proposals. It does not write to PostgreSQL, generate fact keys or canonical subject IDs, decide mutations, generate embeddings, or retrieve memories. Source message IDs remain application-owned provenance and are deterministically attached after model output is validated.
+`extract_memories()` accepts one current user/assistant interaction and returns validated `CandidateMemory` proposals. It can additionally receive a `ConversationContext` containing a rolling summary, recent pre-target messages, and a small optional PostgreSQL lexical-match window from older raw messages. That context may resolve references, but the target interaction remains the only source of evidence for a new memory. It does not write to PostgreSQL, generate fact keys or canonical subject IDs, decide mutations, generate embeddings, or retrieve memories. Source message IDs remain application-owned provenance and are deterministically attached after model output is validated.
 
 `write_memories()` validates the existing user, optional conversation, and message provenance before deterministically writing a batch. Known structured facts use exact scoped identity to ADD, NOOP, or SUPERSEDE while preserving historical rows. Open semantic memories use exact normalized-text deduplication only; retrieval, embeddings generation, FAISS, and semantic contradiction detection remain deliberately out of scope.
 
@@ -22,7 +22,24 @@ python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
 
-Set `DATABASE_URL` in `.env` to your Neon connection string. Standard `postgresql://...` Neon URLs are accepted and are routed through psycopg 3 automatically. `DATABASE_POOL_SIZE` and `DATABASE_MAX_OVERFLOW` default to 5 to keep the normal Neon connection pool small. `DIRECT_URL` is retained only as configuration for future migration or administration work; Milestone 1 application sessions never use it. Provider clients are configured independently through the `LLM_*` and `EMBEDDING_*` variables; creating a client never sends a provider request.
+Set `DATABASE_URL` in `.env` to your Neon connection string. Standard `postgresql://...` Neon URLs are accepted and are routed through psycopg 3 automatically. `DATABASE_POOL_SIZE` and `DATABASE_MAX_OVERFLOW` default to 5 to keep the normal Neon connection pool small. Application sessions always use `DATABASE_URL`; Alembic migrations prefer `DIRECT_URL` and otherwise fall back to `DATABASE_URL`. Provider clients are configured independently through the `LLM_*` and `EMBEDDING_*` variables; creating a client never sends a provider request.
+
+## Migrations
+
+Use Alembic for PostgreSQL schema changes. A new empty database can be initialized with:
+
+```powershell
+python -m alembic upgrade head
+```
+
+For an existing Milestones 1-4 development database that was created with `create_tables()`, take a backup, verify it has the current pre-Alembic tables, then establish the known baseline before applying the Milestone 5 change:
+
+```powershell
+python -m alembic stamp 0001_initial_schema
+python -m alembic upgrade head
+```
+
+This adds `conversation_summaries` and safely normalizes `memories.importance` to `FLOAT`; it does not drop or recreate data. Do not stamp a database whose schema has not been verified as the Milestones 1-4 baseline. The Milestone 5 downgrade is intentionally unsupported because converting fractional importance values back to integers would lose data.
 
 ## Tests
 

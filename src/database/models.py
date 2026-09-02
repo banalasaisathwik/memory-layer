@@ -73,6 +73,11 @@ class Conversation(Base):
     user: Mapped[User] = relationship(back_populates="conversations")
     messages: Mapped[list["Message"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
     memories: Mapped[list["Memory"]] = relationship(back_populates="conversation")
+    summary: Mapped["ConversationSummary | None"] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
 
 class Message(Base):
@@ -85,6 +90,28 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+
+
+class ConversationSummary(Base):
+    """The one rolling, contextual summary retained for a conversation."""
+
+    __tablename__ = "conversation_summaries"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("conversations.id"),
+        unique=True,
+        index=True,
+    )
+    summary_text: Mapped[str] = mapped_column(Text)
+    covered_through_message_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("messages.id"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    conversation: Mapped[Conversation] = relationship(back_populates="summary")
 
 
 class Memory(Base):

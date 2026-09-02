@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.config import configure, get_config, reset_config
+from src.config import configure, get_config, get_migration_database_url, reset_config
 from src.database.connection import get_engine, reset_engine
 from src.providers import reset_embedding_client, reset_llm_client
 
@@ -77,6 +77,51 @@ def test_direct_url_does_not_replace_application_database_url() -> None:
     )
 
     assert get_engine().url.database == "application-db"
+
+
+def test_migrations_prefer_direct_url_without_printing_it(capsys: pytest.CaptureFixture[str]) -> None:
+    configure(
+        database_url="postgresql://application-user:test-pass@localhost/application-db",
+        direct_url="postgresql://migration-user:test-pass@localhost/direct-db",
+    )
+
+    assert get_migration_database_url().endswith("/direct-db")
+    assert capsys.readouterr().out == ""
+    assert capsys.readouterr().err == ""
+
+
+def test_migrations_fall_back_to_database_url() -> None:
+    configure(
+        database_url="postgresql://application-user:test-pass@localhost/application-db",
+        direct_url=None,
+    )
+
+    assert get_migration_database_url().endswith("/application-db")
+
+
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [
+        ("summary_trigger_messages", 0),
+        ("summary_recent_keep", 0),
+        ("extraction_recent_messages", 0),
+        ("extraction_lexical_messages", 0),
+    ],
+)
+def test_context_settings_must_be_positive(setting: str, value: int) -> None:
+    with pytest.raises(ValueError):
+        configure(**{setting: value})
+
+
+def test_metadata_includes_summary_table_and_float_importance() -> None:
+    from sqlalchemy import Float
+
+    from src.database.models import Base
+
+    summary = Base.metadata.tables["conversation_summaries"]
+    assert summary.c.conversation_id.unique is True
+    assert summary.c.covered_through_message_id.nullable is True
+    assert isinstance(Base.metadata.tables["memories"].c.importance.type, Float)
 
 
 def test_engine_is_recreated_when_pool_configuration_changes() -> None:

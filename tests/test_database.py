@@ -27,10 +27,13 @@ from src.database.models import utcnow
 
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
-pytestmark = pytest.mark.skipif(
-    not TEST_DATABASE_URL,
-    reason="TEST_DATABASE_URL is not set; database integration tests never use DATABASE_URL.",
-)
+pytestmark = [
+    pytest.mark.database,
+    pytest.mark.skipif(
+        not TEST_DATABASE_URL,
+        reason="TEST_DATABASE_URL is not set; database integration tests never use DATABASE_URL.",
+    ),
+]
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -52,7 +55,7 @@ def test_engine_connects_and_creates_current_tables() -> None:
         assert connection.execute(text("SELECT 1")).scalar_one() == 1
 
     table_names = set(inspect(engine).get_table_names())
-    assert {"users", "conversations", "messages", "memories"}.issubset(table_names)
+    assert {"users", "conversations", "messages", "memories", "conversation_summaries"}.issubset(table_names)
 
     checked_out_before = engine.pool.checkedout()
     with SessionLocal() as session:
@@ -93,6 +96,16 @@ def test_schema_constraints_and_indexes() -> None:
     } <= {
         frozenset(index["column_names"]) for index in inspector.get_indexes("memories")
     }
+
+    summary_columns = {
+        column["name"]: column for column in inspector.get_columns("conversation_summaries")
+    }
+    assert summary_columns["covered_through_message_id"]["nullable"] is True
+    summary_indexes = inspector.get_indexes("conversation_summaries")
+    assert any(
+        index["column_names"] == ["conversation_id"] and index["unique"]
+        for index in summary_indexes
+    )
 
 
 def test_user_owns_conversations_and_messages() -> None:

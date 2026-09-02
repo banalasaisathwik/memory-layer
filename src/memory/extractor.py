@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, TypeAdapter, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, TypeAdapter, ValidationError
 
 from src.config import get_config
 from src.providers import get_llm_client
 
+from .context import ChatMessage, ConversationContext
 from .prompts import EXTRACTION_SYSTEM_PROMPT
 from .schemas import CandidateMemory
 
@@ -21,22 +22,7 @@ class ExtractionError(Exception):
     """Raised when a provider response cannot safely become candidate memories."""
 
 
-class ExtractionMessage(BaseModel):
-    """One user or assistant message from the designated extraction interaction."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    role: Literal["user", "assistant"]
-    content: str
-
-    @field_validator("content")
-    @classmethod
-    def validate_content(cls, value: str) -> str:
-        """Reject empty message content without changing meaningful user wording."""
-
-        if not value.strip():
-            raise ValueError("content must not be empty or whitespace-only.")
-        return value
+ExtractionMessage = ChatMessage
 
 
 class ExtractionResult(BaseModel):
@@ -53,12 +39,38 @@ _message_list_adapter = TypeAdapter(_MessageList)
 _source_message_ids_adapter = TypeAdapter(_SourceMessageIds)
 
 
-def _request_content(messages: list[ExtractionMessage]) -> str:
-    """Serialize target messages as data, not as additional chat instructions."""
+def _request_content(
+    messages: list[ExtractionMessage],
+    context: ConversationContext | None,
+) -> str:
+    """Keep optional context separate from target-only extraction evidence."""
 
-    return json.dumps(
-        {"messages": [message.model_dump() for message in messages]},
+    target_data = {"messages": [message.model_dump() for message in messages]}
+    if context is None:
+        return json.dumps(target_data, ensure_ascii=False)
+
+    summary = context.summary if context.summary is not None else "(no persisted summary)"
+    recent_messages = json.dumps(
+        {"messages": [message.model_dump() for message in context.recent_messages]},
         ensure_ascii=False,
+    )
+    older_lexical_messages = json.dumps(
+        {"messages": [message.model_dump() for message in context.older_lexical_messages]},
+        ensure_ascii=False,
+    )
+    return (
+        "CONVERSATION SUMMARY — CONTEXT ONLY\n"
+        "Do not create memories solely from this section.\n"
+        f"{summary}\n\n"
+        "RECENT CONTEXT — CONTEXT ONLY\n"
+        "Use only to resolve references and meaning.\n"
+        f"{recent_messages}\n\n"
+        "OLDER LEXICAL CONTEXT — CONTEXT ONLY\n"
+        "Use only to resolve exact older references and meaning.\n"
+        f"{older_lexical_messages}\n\n"
+        "TARGET INTERACTION\n"
+        "Extract new memories only from evidence in this section.\n"
+        f"{json.dumps(target_data, ensure_ascii=False)}"
     )
 
 
@@ -99,11 +111,14 @@ def extract_memories(
     messages: list[ExtractionMessage | dict[str, object]],
     *,
     source_message_ids: list[str | int] | None = None,
+    context: ConversationContext | None = None,
 ) -> list[CandidateMemory]:
     """Extract validated candidates from at most one current user/assistant interaction.
 
-    Source IDs are application-owned provenance: they are never shown to the LLM
-    and are attached to each successfully parsed candidate after validation.
+    Optional context may resolve references but is visibly separated from the
+    target interaction, which remains the only evidence for a new memory. Source
+    IDs are application-owned provenance: they are never shown to the LLM and
+    are attached to each successfully parsed candidate after validation.
     """
 
     target_messages = _message_list_adapter.validate_python(messages)
@@ -118,7 +133,7 @@ def extract_memories(
             model=settings.llm_model,
             messages=[
                 {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-                {"role": "user", "content": _request_content(target_messages)},
+                {"role": "user", "content": _request_content(target_messages, context)},
             ],
             temperature=0,
         )

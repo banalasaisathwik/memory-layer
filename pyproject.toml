@@ -9,6 +9,7 @@ description = "Foundation for reusable, user-scoped long-term memory infrastruct
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "alembic>=1.13",
     "openai>=1.0",
     "psycopg[binary]>=3.1",
     "pydantic>=2.0",

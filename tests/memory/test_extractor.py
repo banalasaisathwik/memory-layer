@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from src.config import configure, reset_config
 from src.database import MemoryType
+from src.memory.context import ChatMessage, ConversationContext
 from src.memory.extractor import (
     EXTRACTION_SYSTEM_PROMPT,
     ExtractionError,
@@ -94,6 +95,36 @@ def test_valid_semantic_memory_parses_and_attaches_provenance(fake_completions: 
     assert json.loads(fake_completions.calls[0]["messages"][1]["content"]) == {
         "messages": [{"role": "user", "content": "I prefer PostgreSQL."}]
     }
+
+
+def test_context_is_labeled_separately_from_target_and_keeps_target_only_provenance(
+    fake_completions: FakeCompletions,
+) -> None:
+    fake_completions.content = json.dumps({"memories": [{"memory_text": "User chose PostgreSQL"}]})
+
+    memories = extract_memories(
+        [{"role": "user", "content": "Yes, I'll use that."}],
+        source_message_ids=["target-89", "target-90"],
+        context=ConversationContext(
+            summary="User knows Python. User lives in Bangalore.",
+            recent_messages=[
+                ChatMessage(role="assistant", content="PostgreSQL may fit your workload."),
+            ],
+            older_lexical_messages=[
+                ChatMessage(role="user", content="The deployment target is PostgreSQL."),
+            ],
+        ),
+    )
+
+    prompt = fake_completions.calls[0]["messages"][1]["content"]
+    assert "CONVERSATION SUMMARY — CONTEXT ONLY" in prompt
+    assert "Do not create memories solely from this section." in prompt
+    assert "RECENT CONTEXT — CONTEXT ONLY" in prompt
+    assert "OLDER LEXICAL CONTEXT — CONTEXT ONLY" in prompt
+    assert "TARGET INTERACTION" in prompt
+    assert "treat the target interaction as authoritative" in EXTRACTION_SYSTEM_PROMPT
+    assert "Yes, I'll use that." in prompt
+    assert memories[0].source_message_ids == ["target-89", "target-90"]
 
 
 def test_multiple_candidates_parse(fake_completions: FakeCompletions) -> None:
@@ -246,3 +277,5 @@ def test_interaction_is_bounded_to_two_messages(fake_completions: FakeCompletion
 def test_prompt_excludes_assistant_speculation() -> None:
     assert "Assistant messages may provide conversational context" in EXTRACTION_SYSTEM_PROMPT
     assert "never treat assistant-generated claims, guesses, or speculation as user facts" in EXTRACTION_SYSTEM_PROMPT
+    assert "CONVERSATION SUMMARY — CONTEXT ONLY" in EXTRACTION_SYSTEM_PROMPT
+    assert "OLDER LEXICAL CONTEXT — CONTEXT ONLY" in EXTRACTION_SYSTEM_PROMPT

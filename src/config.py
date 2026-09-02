@@ -27,6 +27,11 @@ class Settings(BaseModel):
     database_pool_size: int = Field(default=5, ge=1)
     database_max_overflow: int = Field(default=5, ge=0)
 
+    summary_trigger_messages: int = Field(default=20, ge=1)
+    summary_recent_keep: int = Field(default=6, ge=1)
+    extraction_recent_messages: int = Field(default=6, ge=1)
+    extraction_lexical_messages: int = Field(default=3, ge=1)
+
     llm_provider: str = "openai"
     llm_api_key: str | None = None
     llm_base_url: str | None = None
@@ -76,6 +81,10 @@ def _settings_from_environment() -> Settings:
         direct_url=_optional_env("DIRECT_URL"),
         database_pool_size=_optional_env("DATABASE_POOL_SIZE") or 5,
         database_max_overflow=_optional_env("DATABASE_MAX_OVERFLOW") or 5,
+        summary_trigger_messages=_optional_env("SUMMARY_TRIGGER_MESSAGES") or 20,
+        summary_recent_keep=_optional_env("SUMMARY_RECENT_KEEP") or 6,
+        extraction_recent_messages=_optional_env("EXTRACTION_RECENT_MESSAGES") or 6,
+        extraction_lexical_messages=_optional_env("EXTRACTION_LEXICAL_MESSAGES") or 3,
         llm_provider=os.getenv("LLM_PROVIDER", "openai"),
         llm_api_key=_optional_env("LLM_API_KEY"),
         llm_base_url=_optional_env("LLM_BASE_URL"),
@@ -95,6 +104,16 @@ def get_config() -> Settings:
     if _settings is None:
         _settings = _settings_from_environment()
     return _settings
+
+
+def get_migration_database_url() -> str:
+    """Return the dedicated migration URL without logging any connection details."""
+
+    settings = get_config()
+    database_url = settings.direct_url or settings.database_url
+    if not database_url:
+        raise RuntimeError("DIRECT_URL or DATABASE_URL must be configured before running migrations.")
+    return database_url
 
 
 def configure(**overrides: object) -> Settings:
