@@ -27,4 +27,4 @@ markers = [
 ]
 
 [tool.setuptools]
-packages = ["src", "src.database", "src.providers"]
+packages = ["src", "src.database", "src.memory", "src.providers"]

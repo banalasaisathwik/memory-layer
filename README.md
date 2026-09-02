@@ -1,8 +1,8 @@
 # Memory Layer
 
-Memory Layer is a small, reusable foundation for applications that need durable, user-scoped long-term memory. This repository currently implements only the Milestone 1 foundation: configuration, lazy OpenAI-compatible provider clients, a Neon/PostgreSQL connection layer, and the initial SQLAlchemy schema.
+Memory Layer is a small, reusable foundation for applications that need durable, user-scoped long-term memory. It implements the Milestone 1 foundation (configuration, lazy OpenAI-compatible provider clients, a Neon/PostgreSQL connection layer, and the initial SQLAlchemy schema) plus Milestone 2 deterministic candidate-memory identity for a small set of known predicates.
 
-Memory extraction, retrieval, embeddings generation, FAISS, and supersession behavior are deliberately not implemented yet.
+Memory extraction, write lifecycle decisions, retrieval, embeddings generation, FAISS, and supersession behavior are deliberately not implemented yet.
 
 ## Prerequisites
 
