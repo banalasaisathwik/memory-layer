@@ -1,0 +1,120 @@
+"""Public user-scoped hybrid memory search API."""
+
+from __future__ import annotations
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from src.database.models import Conversation, User
+
+from .errors import InvalidFilterScopeError, InvalidSearchError, UserNotFoundError
+from .fusion import reciprocal_rank_fusion
+from .lexical import lexical_retrieve
+from .schemas import SearchFilters, SearchHit
+from .structured import structured_retrieve
+from .vector import vector_retrieve
+
+
+_MAX_SEARCH_LIMIT = 100
+_BRANCH_CANDIDATE_MULTIPLIER = 5
+
+
+def _resolve_user(db: Session, user_external_id: str) -> User:
+    user = db.scalar(select(User).where(User.external_id == user_external_id))
+    if user is None:
+        raise UserNotFoundError(f"No user exists for external ID {user_external_id!r}.")
+    return user
+
+
+def _resolve_filter_conversation(
+    db: Session,
+    *,
+    user: User,
+    filters: SearchFilters,
+) -> Conversation | None:
+    if filters.conversation_external_id is None:
+        return None
+    conversations = list(
+        db.scalars(
+            select(Conversation).where(
+                Conversation.external_id == filters.conversation_external_id,
+                Conversation.user_id == user.id,
+            )
+        )
+    )
+    if not conversations:
+        raise InvalidFilterScopeError("The supplied conversation does not belong to the requested user.")
+    if len(conversations) > 1:
+        raise InvalidFilterScopeError("The supplied conversation external ID is ambiguous for the requested user.")
+    return conversations[0]
+
+
+def search_memories(
+    db: Session,
+    query: str,
+    *,
+    user_external_id: str,
+    limit: int = 10,
+    filters: SearchFilters | None = None,
+) -> list[SearchHit]:
+    """Search one user's active memories with structured, FTS, and FAISS branches.
+
+    A missing, stale, or corrupt local FAISS index is rebuilt from PostgreSQL
+    during the vector branch. That rebuild may call the configured embedding
+    provider only for rows missing the configured embedding model.
+    """
+
+    if not isinstance(query, str) or not query.strip():
+        raise InvalidSearchError("query must not be empty or whitespace-only.")
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= _MAX_SEARCH_LIMIT:
+        raise InvalidSearchError(f"limit must be an integer from 1 to {_MAX_SEARCH_LIMIT}.")
+    active_filters = filters or SearchFilters()
+    user = _resolve_user(db, user_external_id)
+    conversation = _resolve_filter_conversation(db, user=user, filters=active_filters)
+    branch_limit = min(_MAX_SEARCH_LIMIT, limit * _BRANCH_CANDIDATE_MULTIPLIER)
+
+    structured = structured_retrieve(
+        db,
+        user=user,
+        filters=active_filters,
+        conversation=conversation,
+        limit=branch_limit,
+    )
+    lexical = lexical_retrieve(
+        db,
+        query,
+        user=user,
+        filters=active_filters,
+        conversation=conversation,
+        limit=branch_limit,
+    )
+    vector = vector_retrieve(
+        db,
+        query,
+        user=user,
+        filters=active_filters,
+        conversation=conversation,
+        limit=limit,
+    )
+    fused = reciprocal_rank_fusion(structured=structured, lexical=lexical, vector=vector)
+    return [
+        SearchHit(
+            memory_id=str(hit.memory.id),
+            memory_text=hit.memory.memory_text,
+            memory_type=hit.memory.memory_type.value,
+            fact_key=hit.memory.fact_key,
+            predicate=hit.memory.predicate,
+            value=hit.memory.value,
+            is_active=hit.memory.is_active,
+            confidence=hit.memory.confidence,
+            importance=hit.memory.importance,
+            created_at=hit.memory.created_at,
+            valid_from=hit.memory.valid_from,
+            valid_to=hit.memory.valid_to,
+            score=hit.score,
+            structured_rank=hit.structured_rank,
+            lexical_rank=hit.lexical_rank,
+            vector_rank=hit.vector_rank,
+        )
+        for hit in fused[:limit]
+    ]

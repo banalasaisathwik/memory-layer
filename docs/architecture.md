@@ -4,7 +4,7 @@
 
 Memory Layer is a reusable memory infrastructure package for applications using LLMs. It is not an agent framework, a chatbot, a Context Builder, or a document RAG platform.
 
-Milestone 1 established configuration, provider client construction, PostgreSQL connectivity, and durable relational models. Milestone 2 adds deterministic candidate-memory identity. Milestone 3 adds bounded LLM extraction into validated `CandidateMemory` objects. Milestone 4 adds validated, deterministic PostgreSQL writes and temporal supersession. Milestone 5 adds bounded conversation context, a single rolling summary per conversation, and Alembic schema migrations; retrieval remains unimplemented.
+Milestone 1 established configuration, provider client construction, PostgreSQL connectivity, and durable relational models. Milestone 2 adds deterministic candidate-memory identity. Milestone 3 adds bounded LLM extraction into validated `CandidateMemory` objects. Milestone 4 adds validated, deterministic PostgreSQL writes and temporal supersession. Milestone 5 adds bounded conversation context, a single rolling summary per conversation, and Alembic schema migrations. Milestone 6 adds user-scoped hybrid retrieval over durable `Memory` rows.
 
 ## Current boundary
 
@@ -85,15 +85,15 @@ Latest interaction ----------------+
 
 The extractor receives four explicitly labeled sections: `CONVERSATION SUMMARY — CONTEXT ONLY`, `RECENT CONTEXT — CONTEXT ONLY`, `OLDER LEXICAL CONTEXT — CONTEXT ONLY`, and `TARGET INTERACTION`. Context helps interpretation; the target provides all new-memory evidence. Therefore only application-supplied target IDs become candidate provenance—summary, recent context, and lexical-match IDs are never attached to a new `Memory`.
 
-This is conversation-context retrieval only. It intentionally uses no embeddings, FAISS, or semantic raw-message retrieval; semantic older-message retrieval remains a Milestone 6 concern.
+This is conversation-context retrieval only. It intentionally uses no embeddings, FAISS, or semantic raw-message retrieval; semantic older-message retrieval remains a deliberately separate follow-up after Milestone 6.
 
 `update_conversation_summary()` requires the same user and conversation scope and maintains one row per conversation. It retains the newest `SUMMARY_RECENT_KEEP` messages outside the summary (default 6), and calls the provider only once the remaining eligible history reaches `SUMMARY_TRIGGER_MESSAGES` (default 20). An update sends the prior summary plus only messages that became newly eligible, then advances `covered_through_message_id`; it never resends the entire conversation after the initial summary. Empty output, provider failure, an invalid coverage marker, or persistence failure raises `SummaryError` and rolls back the attempted write.
 
 ## Alembic migration strategy
 
-`alembic/` is a conventional Alembic environment wired to `Base.metadata`. A new PostgreSQL/Neon database uses `python -m alembic upgrade head`. For an existing, verified Milestones 1-4 database created by `create_tables()`, first make a backup, run `python -m alembic stamp 0001_initial_schema`, then run `python -m alembic upgrade head`. The second revision adds `conversation_summaries` and converts `memories.importance` with `importance::double precision`; it does not recreate existing data.
+`alembic/` is a conventional Alembic environment wired to `Base.metadata`. A new PostgreSQL/Neon database uses `python -m alembic upgrade head`. For an existing, verified Milestones 1-4 database created by `create_tables()`, first make a backup, run `python -m alembic stamp 0001_initial_schema`, then run `python -m alembic upgrade head`. The second revision adds `conversation_summaries` and converts `memories.importance` with `importance::double precision`; it does not recreate existing data. The third revision adds nullable JSONB `embedding`, nullable `embedding_model`, and the `simple`-configuration GIN expression index over `memories.memory_text`; it never makes an embedding-provider request.
 
-The Milestone 5 downgrade is intentionally unsupported because a FLOAT-to-integer conversion could discard fractional importance values. Do not use migration commands against an unverified database. Application migrations never read `TEST_DATABASE_URL`; any migration verification against a dedicated test database must explicitly supply that test URL.
+The Milestone 5 downgrade is intentionally unsupported because a FLOAT-to-integer conversion could discard fractional importance values. The Milestone 6 downgrade is also unsupported because it would discard durable embeddings. Do not use migration commands against an unverified database. Application migrations never read `TEST_DATABASE_URL`; any migration verification against a dedicated test database must explicitly supply that test URL.
 
 ## Implemented extraction boundary
 
@@ -157,24 +157,46 @@ Episodic memory also has no fact key, but repeated text can describe distinct ev
 
 The LLM proposes `CandidateMemory`. Deterministic code owns user scope, conversation and provenance validation, predicate resolution, fact-key generation, active-memory lookup, mutation decisions, and transaction execution. The write path makes no LLM, embedding, FAISS, or retrieval call.
 
-## Planned retrieval architecture
+## Hybrid memory retrieval
 
-The following is also planned only:
+`search_memories()` reads long-term memory without an LLM. Its public boundary requires `user_external_id`, resolves that user before any branch runs, and includes user scope in each PostgreSQL query. A supplied conversation filter must resolve to a conversation owned by that user. It restricts results to memories with that explicit `conversation_id`; user-level memories with `conversation_id = NULL` do not implicitly belong to every conversation.
 
 ```text
-query
- |- structured PostgreSQL retrieval
- |- PostgreSQL lexical retrieval
- `- FAISS semantic retrieval
-             |
-           fusion
-             |
-        final results
+                         Memory PostgreSQL
+                               |
+          +--------------------+--------------------+
+          |                    |                    |
+   structured lookup      lexical FTS         FAISS vector
+          |                    |                    |
+          +--------------------+--------------------+
+                               |
+                              RRF
+                               |
+                         ranked results
 ```
+
+PostgreSQL is authoritative. It stores memory text, structure, temporal state, normalized embeddings, and the embedding model. The structured branch is activated only by known caller-supplied filters such as `fact_key`, `predicate`, `memory_type`, `subject_type`, or conversation. The lexical branch uses PostgreSQL `to_tsvector('simple', memory_text)`, `websearch_to_tsquery`, `ts_rank_cd`, and a GIN expression index. The `simple` configuration preserves technical vocabulary better than stemming configurations; a small literal substring fallback handles punctuation-heavy identifiers when FTS finds no match.
+
+FAISS is derived local search state, never the only copy of a vector or identity. Each V1 index belongs to exactly one user, not a conversation, and uses a SHA-256 user fingerprint rather than the raw external ID in its filenames. The persisted JSON metadata contains the fingerprint, embedding model, embedding dimension, and the position-to-memory-UUID list needed by `IndexFlatIP`. Candidate UUIDs are always resolved and state-filtered through PostgreSQL before they become results.
+
+`IndexFlatIP` over normalized vectors is an exact cosine-similarity scan, not approximate nearest-neighbor search. Its per-query work is roughly `O(N * embedding_dimension)` for that user's indexed memories. This V1 choice is deliberately simple and testable. Missing, corrupt, stale, or model-mismatched FAISS files are rebuilt from PostgreSQL; a query/index dimension mismatch is rejected before FAISS search. A model change causes rows without the current model to be re-embedded before rebuild. The writer remains independent of this work, so a successful memory write does not depend on vector availability.
+
+The index may contain historical rows, but default retrieval always requires `is_active = true`. Setting `include_history=True` makes inactive/superseded rows eligible. Vector retrieval oversamples a small multiple of the requested limit before PostgreSQL filters historical rows, so historical candidates do not unnecessarily consume the final result window.
+
+The branches have incompatible raw score scales (structured ordering, PostgreSQL `ts_rank_cd`, and cosine similarity), so they are combined only with Reciprocal Rank Fusion: `sum(1 / (60 + rank))`. Search results expose each branch rank and the RRF score. Importance and timestamps are returned and only provide deterministic secondary tie-breaking; no uncalibrated weighting formula is applied.
+
+### Current retrieval limitations
+
+- A local index per user may be inefficient at very large user counts.
+- Exact `IndexFlatIP` becomes expensive for very large per-user memory sets.
+- Structured filters are caller-supplied; natural-language structure inference is not implemented.
+- Importance, recency, and branch behavior are not yet benchmark-calibrated.
+- Historical vectors can require oversampling before active-state filtering.
+- Semantic retrieval of raw `Message` context is intentionally deferred; the vector helpers can be reused without turning this package into a generic framework.
 
 ## Design principles
 
 - LLMs perform semantic judgment; deterministic code validates and executes decisions.
 - Structured memory is useful where deterministic identity matters, while unstructured memory remains valid for open-world information.
-- PostgreSQL stores durable memory state; vector retrieval will supplement, not replace, it.
+- PostgreSQL stores durable memory state; FAISS supplements, never replaces, it.
 - The architecture stays small until added complexity solves a real problem.

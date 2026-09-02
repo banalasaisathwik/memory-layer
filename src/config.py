@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -41,6 +42,10 @@ class Settings(BaseModel):
     embedding_api_key: str | None = None
     embedding_base_url: str | None = None
     embedding_model: str = Field(default="text-embedding-3-small")
+
+    # FAISS is local, derived search state. PostgreSQL remains authoritative.
+    faiss_index_dir: Path = Field(default=Path(".memory-layer/faiss"))
+    vector_candidate_multiplier: int = Field(default=5, ge=1, le=10)
 
     debug: bool = False
 
@@ -93,6 +98,8 @@ def _settings_from_environment() -> Settings:
         embedding_api_key=_optional_env("EMBEDDING_API_KEY"),
         embedding_base_url=_optional_env("EMBEDDING_BASE_URL"),
         embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
+        faiss_index_dir=_optional_env("FAISS_INDEX_DIR") or ".memory-layer/faiss",
+        vector_candidate_multiplier=_optional_env("VECTOR_CANDIDATE_MULTIPLIER") or 5,
         debug=_debug_from_environment(),
     )
 

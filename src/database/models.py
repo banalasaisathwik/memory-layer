@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum as SqlEnum, Float, ForeignKey, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Enum as SqlEnum, Float, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
@@ -47,6 +47,7 @@ memory_type_enum = SqlEnum(
     values_callable=lambda types: [memory_type.value for memory_type in types],
 )
 source_message_ids_type = JSON().with_variant(JSONB, "postgresql")
+embedding_type = JSON().with_variant(JSONB, "postgresql")
 
 
 class User(Base):
@@ -136,6 +137,11 @@ class Memory(Base):
 
     source_message_ids: Mapped[list[str]] = mapped_column(source_message_ids_type, default=list)
 
+    # Normalized vectors are durable so a local FAISS index can be rebuilt
+    # without calling an embedding provider again.
+    embedding: Mapped[list[float] | None] = mapped_column(embedding_type, nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     superseded_by_id: Mapped[UUID | None] = mapped_column(ForeignKey("memories.id"), nullable=True)
@@ -147,3 +153,12 @@ class Memory(Base):
     user: Mapped[User] = relationship(back_populates="memories")
     conversation: Mapped[Conversation | None] = relationship(back_populates="memories")
     superseded_by: Mapped["Memory | None"] = relationship(remote_side="Memory.id", foreign_keys=[superseded_by_id])
+
+
+# PostgreSQL uses this functional GIN index for native lexical memory search.
+# Keeping it in metadata makes create_tables() match the Alembic schema.
+Index(
+    "ix_memories_memory_text_fts",
+    func.to_tsvector("simple", Memory.memory_text),
+    postgresql_using="gin",
+)
