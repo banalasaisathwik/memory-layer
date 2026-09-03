@@ -7,6 +7,7 @@ from .predicates import PREDICATE_ALIASES, PREDICATES, get_predicate_cardinality
 from .schemas import CandidateMemory
 from .summaries import SummaryError, update_conversation_summary
 from .writer import WriteAction, WriteError, WriteResult, write_memories
+from src.retrieval import retrieve_semantic_message_context
 
 __all__ = [
     "CandidateMemory",
@@ -25,6 +26,7 @@ __all__ = [
     "normalize_subject_type",
     "normalize_value_identity",
     "resolve_predicate",
+    "retrieve_semantic_message_context",
     "WriteAction",
     "WriteError",
     "WriteResult",

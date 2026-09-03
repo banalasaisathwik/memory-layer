@@ -106,6 +106,8 @@ def test_migrations_fall_back_to_database_url() -> None:
         ("summary_recent_keep", 0),
         ("extraction_recent_messages", 0),
         ("extraction_lexical_messages", 0),
+        ("extraction_semantic_messages", 0),
+        ("extraction_old_messages", 0),
     ],
 )
 def test_context_settings_must_be_positive(setting: str, value: int) -> None:

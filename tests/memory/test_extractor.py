@@ -113,6 +113,9 @@ def test_context_is_labeled_separately_from_target_and_keeps_target_only_provena
             older_lexical_messages=[
                 ChatMessage(role="user", content="The deployment target is PostgreSQL."),
             ],
+            older_semantic_messages=[
+                ChatMessage(role="user", content="User lives in Bangalore."),
+            ],
         ),
     )
 
@@ -120,7 +123,8 @@ def test_context_is_labeled_separately_from_target_and_keeps_target_only_provena
     assert "CONVERSATION SUMMARY — CONTEXT ONLY" in prompt
     assert "Do not create memories solely from this section." in prompt
     assert "RECENT CONTEXT — CONTEXT ONLY" in prompt
-    assert "OLDER LEXICAL CONTEXT — CONTEXT ONLY" in prompt
+    assert "RELEVANT OLDER CONTEXT — CONTEXT ONLY" in prompt
+    assert "User lives in Bangalore." in prompt
     assert "TARGET INTERACTION" in prompt
     assert "treat the target interaction as authoritative" in EXTRACTION_SYSTEM_PROMPT
     assert "Yes, I'll use that." in prompt
@@ -278,4 +282,4 @@ def test_prompt_excludes_assistant_speculation() -> None:
     assert "Assistant messages may provide conversational context" in EXTRACTION_SYSTEM_PROMPT
     assert "never treat assistant-generated claims, guesses, or speculation as user facts" in EXTRACTION_SYSTEM_PROMPT
     assert "CONVERSATION SUMMARY — CONTEXT ONLY" in EXTRACTION_SYSTEM_PROMPT
-    assert "OLDER LEXICAL CONTEXT — CONTEXT ONLY" in EXTRACTION_SYSTEM_PROMPT
+    assert "RELEVANT OLDER CONTEXT — CONTEXT ONLY" in EXTRACTION_SYSTEM_PROMPT

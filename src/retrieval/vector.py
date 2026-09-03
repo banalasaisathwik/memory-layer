@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from hashlib import sha256
 import json
-import math
 import os
 from pathlib import Path
-import tempfile
 from typing import Any
 
 import faiss
@@ -30,6 +27,12 @@ from .errors import (
 )
 from .schemas import SearchFilters
 from .structured import memory_filter_conditions
+from .vector_support import (
+    embedding_response_vectors,
+    normalize_embedding,
+    safe_fingerprint,
+    temporary_path,
+)
 
 
 _INDEX_FORMAT_VERSION = 1
@@ -48,7 +51,7 @@ class UserVectorIndex:
 def _user_fingerprint(user_external_id: str) -> str:
     """Create a filesystem-safe identity without exposing an external user ID."""
 
-    return sha256(user_external_id.encode("utf-8")).hexdigest()
+    return safe_fingerprint(user_external_id)
 
 
 def user_index_paths(
@@ -85,37 +88,17 @@ def _user_memories(db: Session, *, user: User) -> list[Memory]:
 def _normalize_embedding(values: object) -> np.ndarray:
     """Validate and normalize one vector for IndexFlatIP cosine search."""
 
-    try:
-        vector = np.asarray(values, dtype=np.float32)
-    except (TypeError, ValueError) as error:
-        raise InvalidEmbeddingError("Embedding values must be a numeric vector.") from error
-    if vector.ndim != 1 or vector.size == 0:
-        raise InvalidEmbeddingError("Embedding vectors must be one-dimensional and non-empty.")
-    if not np.isfinite(vector).all():
-        raise InvalidEmbeddingError("Embedding vectors must contain only finite values.")
-    norm = float(np.linalg.norm(vector))
-    if not math.isfinite(norm) or norm == 0:
-        raise InvalidEmbeddingError("Embedding vectors must have a non-zero norm.")
-    return vector / norm
+    return normalize_embedding(values)
 
 
 def _embedding_response_vectors(texts: list[str]) -> list[np.ndarray]:
     """Create one provider request for a batch and validate its response shape."""
 
-    if not texts:
-        return []
-    settings = get_config()
-    try:
-        response = get_embedding_client().embeddings.create(
-            model=settings.embedding_model,
-            input=texts,
-        )
-        data = sorted(response.data, key=lambda item: getattr(item, "index", 0))
-    except Exception as error:
-        raise EmbeddingError("The configured embedding provider could not generate vectors.") from error
-    if len(data) != len(texts):
-        raise EmbeddingError("The embedding provider returned an unexpected number of vectors.")
-    return [_normalize_embedding(item.embedding) for item in data]
+    return embedding_response_vectors(
+        texts,
+        model=get_config().embedding_model,
+        client_factory=get_embedding_client,
+    )
 
 
 def _embedding_rows_requiring_sync(memories: list[Memory], *, model: str) -> list[Memory]:
@@ -157,9 +140,7 @@ def _validated_memory_matrix(memories: list[Memory], *, model: str) -> np.ndarra
 
 
 def _temporary_path(directory: Path, suffix: str) -> Path:
-    handle = tempfile.NamedTemporaryFile(dir=directory, suffix=suffix, delete=False)
-    handle.close()
-    return Path(handle.name)
+    return temporary_path(directory, suffix)
 
 
 def _persist_user_index(

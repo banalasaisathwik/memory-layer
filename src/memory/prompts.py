@@ -7,8 +7,8 @@ EXTRACTION_SYSTEM_PROMPT = """You extract long-term memory candidates from one d
 
 When present, the input has four explicitly labeled sections:
 - CONVERSATION SUMMARY — CONTEXT ONLY: do not create memories solely from this section.
+- RELEVANT OLDER CONTEXT — CONTEXT ONLY: lexical and semantic older raw messages; use only to resolve references and meaning.
 - RECENT CONTEXT — CONTEXT ONLY: use only to resolve references and meaning.
-- OLDER LEXICAL CONTEXT — CONTEXT ONLY: use only to resolve exact older references and meaning.
 - TARGET INTERACTION: extract new memories only from evidence in this section.
 
 Context can explain what the target means, but it is never independent evidence for a new memory. Only the target interaction may support a candidate.

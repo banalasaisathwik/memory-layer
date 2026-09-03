@@ -41,6 +41,16 @@ def test_hybrid_migration_adds_embeddings_and_fts_index() -> None:
     assert "postgresql_using=\"gin\"" in migration
 
 
+def test_message_embedding_migration_is_after_hybrid_memory_retrieval() -> None:
+    migration = Path("alembic/versions/0004_message_embedding_persistence.py").read_text(encoding="utf-8")
+
+    assert 'down_revision = "0003_hybrid_memory_retrieval"' in migration
+    assert 'add_column("messages", sa.Column("embedding"' in migration
+    assert 'add_column("messages", sa.Column("embedding_model"' in migration
+    assert 'revision = "0004_message_embeddings"' in migration
+    assert len("0004_message_embeddings") <= 32
+
+
 def test_embeddings_are_normalized_for_exact_inner_product_cosine_search() -> None:
     stored = _normalize_embedding([3.0, 4.0])
     query = _normalize_embedding([6.0, 8.0])

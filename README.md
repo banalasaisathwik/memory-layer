@@ -1,8 +1,8 @@
 # Memory Layer
 
-Memory Layer is a small, reusable foundation for applications that need durable, user-scoped long-term memory. It implements the Milestone 1 foundation (configuration, lazy OpenAI-compatible provider clients, a Neon/PostgreSQL connection layer, and the initial SQLAlchemy schema), Milestone 2 deterministic candidate-memory identity, Milestone 3 bounded LLM extraction into validated candidates, Milestone 4 validated PostgreSQL writes with temporal supersession, Milestone 5 bounded conversation context with rolling summaries, and Milestone 6 hybrid memory retrieval.
+Memory Layer is a small, reusable foundation for applications that need durable, user-scoped long-term memory. It implements the Milestone 1 foundation (configuration, lazy OpenAI-compatible provider clients, a Neon/PostgreSQL connection layer, and the initial SQLAlchemy schema), Milestone 2 deterministic candidate-memory identity, Milestone 3 bounded LLM extraction into validated candidates, Milestone 4 validated PostgreSQL writes with temporal supersession, Milestone 5 bounded conversation context with rolling summaries, Milestone 6 hybrid memory retrieval, and Milestone 6.1 semantic old-message context retrieval.
 
-`extract_memories()` accepts one current user/assistant interaction and returns validated `CandidateMemory` proposals. It can additionally receive a `ConversationContext` containing a rolling summary, recent pre-target messages, and a small optional PostgreSQL lexical-match window from older raw messages. That context may resolve references, but the target interaction remains the only source of evidence for a new memory. It does not write to PostgreSQL, generate fact keys or canonical subject IDs, decide mutations, generate embeddings, or retrieve memories. Source message IDs remain application-owned provenance and are deterministically attached after model output is validated.
+`extract_memories()` accepts one current user/assistant interaction and returns validated `CandidateMemory` proposals. It can additionally receive a `ConversationContext` containing a rolling summary, recent pre-target messages, and a bounded deduplicated union of lexical and semantic older raw-message matches. That context may resolve references, but the target interaction remains the only source of evidence for a new memory. It does not write to PostgreSQL, generate fact keys or canonical subject IDs, decide mutations, generate embeddings, or retrieve long-term memories. Source message IDs remain application-owned provenance and are deterministically attached after model output is validated.
 
 `write_memories()` validates the existing user, optional conversation, and message provenance before deterministically writing a batch. Known structured facts use exact scoped identity to ADD, NOOP, or SUPERSEDE while preserving historical rows. Open semantic memories use exact normalized-text deduplication only. The write path never calls retrieval, FAISS, or an embedding provider.
 
@@ -41,7 +41,7 @@ python -m alembic stamp 0001_initial_schema
 python -m alembic upgrade head
 ```
 
-This adds `conversation_summaries` and safely normalizes `memories.importance` to `FLOAT`; it does not drop or recreate data. Do not stamp a database whose schema has not been verified as the Milestones 1-4 baseline. The Milestone 5 downgrade is intentionally unsupported because converting fractional importance values back to integers would lose data. The Milestone 6 migration adds nullable `memories.embedding` and `memories.embedding_model` columns plus a PostgreSQL `simple`-configuration GIN full-text index; it does not generate embeddings or make provider requests.
+This adds `conversation_summaries` and safely normalizes `memories.importance` to `FLOAT`; it does not drop or recreate data. Do not stamp a database whose schema has not been verified as the Milestones 1-4 baseline. The Milestone 5 downgrade is intentionally unsupported because converting fractional importance values back to integers would lose data. The Milestone 6 migration adds nullable `memories.embedding` and `memories.embedding_model` columns plus a PostgreSQL `simple`-configuration GIN full-text index; it does not generate embeddings or make provider requests. The Milestone 6.1 migration adds nullable `messages.embedding` and `messages.embedding_model` columns for durable semantic context rebuilding, also without provider requests.
 
 ## Search
 
@@ -59,6 +59,18 @@ hits = search_memories(
 Search defaults to active memories. Pass `SearchFilters(include_history=True)` to include superseded rows, or a `conversation_external_id` filter to restrict results to memories that explicitly originated in that user-owned conversation. Memories with `conversation_id=NULL` are user-level and do not match a conversation filter.
 
 FAISS files are local derived state in `FAISS_INDEX_DIR` (default `.memory-layer/faiss`). PostgreSQL stores the durable text, structure, temporal state, embeddings, and embedding model, so missing, stale, or corrupt local files are rebuilt. Automatic synchronization embeds only rows that do not have the currently configured embedding model; it never changes the write pipeline.
+
+## Extraction context
+
+`build_extraction_context()` keeps the extractor input bounded and target-authoritative:
+
+```text
+rolling summary + recent messages + lexical old + semantic old
+    -> deduplicated relevant older context
+    -> target extraction
+```
+
+Semantic raw-message lookup is per conversation, not per user and not a substitute for `search_memories()`. PostgreSQL persists Message embeddings and remains authoritative; local per-conversation FAISS files are rebuildable derived state. If this optional semantic branch fails, the returned context exposes a sanitized `semantic_retrieval_error` while retaining safe summary, lexical, and recent context.
 
 ## Tests
 

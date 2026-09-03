@@ -50,24 +50,36 @@ def _request_content(
         return json.dumps(target_data, ensure_ascii=False)
 
     summary = context.summary if context.summary is not None else "(no persisted summary)"
-    recent_messages = json.dumps(
-        {"messages": [message.model_dump() for message in context.recent_messages]},
+    # Production contexts carry a UUID-deduplicated union.  The small fallback
+    # preserves compatibility for callers constructing ConversationContext
+    # directly with the Milestone 5 lexical field.
+    relevant_messages = context.older_relevant_messages
+    if not relevant_messages:
+        relevant_messages = []
+        seen: set[tuple[str, str]] = set()
+        for message in [*context.older_lexical_messages, *context.older_semantic_messages]:
+            identity = (message.role, message.content)
+            if identity not in seen:
+                seen.add(identity)
+                relevant_messages.append(message)
+    older_context = json.dumps(
+        {"messages": [message.model_dump() for message in relevant_messages]},
         ensure_ascii=False,
     )
-    older_lexical_messages = json.dumps(
-        {"messages": [message.model_dump() for message in context.older_lexical_messages]},
+    recent_messages = json.dumps(
+        {"messages": [message.model_dump() for message in context.recent_messages]},
         ensure_ascii=False,
     )
     return (
         "CONVERSATION SUMMARY — CONTEXT ONLY\n"
         "Do not create memories solely from this section.\n"
         f"{summary}\n\n"
+        "RELEVANT OLDER CONTEXT — CONTEXT ONLY\n"
+        "Use only to resolve older references and meaning.\n"
+        f"{older_context}\n\n"
         "RECENT CONTEXT — CONTEXT ONLY\n"
         "Use only to resolve references and meaning.\n"
         f"{recent_messages}\n\n"
-        "OLDER LEXICAL CONTEXT — CONTEXT ONLY\n"
-        "Use only to resolve exact older references and meaning.\n"
-        f"{older_lexical_messages}\n\n"
         "TARGET INTERACTION\n"
         "Extract new memories only from evidence in this section.\n"
         f"{json.dumps(target_data, ensure_ascii=False)}"

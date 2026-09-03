@@ -32,6 +32,8 @@ class Settings(BaseModel):
     summary_recent_keep: int = Field(default=6, ge=1)
     extraction_recent_messages: int = Field(default=6, ge=1)
     extraction_lexical_messages: int = Field(default=3, ge=1)
+    extraction_semantic_messages: int = Field(default=3, ge=1)
+    extraction_old_messages: int = Field(default=6, ge=1)
 
     llm_provider: str = "openai"
     llm_api_key: str | None = None
@@ -90,6 +92,8 @@ def _settings_from_environment() -> Settings:
         summary_recent_keep=_optional_env("SUMMARY_RECENT_KEEP") or 6,
         extraction_recent_messages=_optional_env("EXTRACTION_RECENT_MESSAGES") or 6,
         extraction_lexical_messages=_optional_env("EXTRACTION_LEXICAL_MESSAGES") or 3,
+        extraction_semantic_messages=_optional_env("EXTRACTION_SEMANTIC_MESSAGES") or 3,
+        extraction_old_messages=_optional_env("EXTRACTION_OLD_MESSAGES") or 6,
         llm_provider=os.getenv("LLM_PROVIDER", "openai"),
         llm_api_key=_optional_env("LLM_API_KEY"),
         llm_base_url=_optional_env("LLM_BASE_URL"),

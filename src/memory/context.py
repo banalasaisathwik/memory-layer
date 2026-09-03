@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from src.config import get_config
 from src.database.models import Conversation, ConversationSummary, Message, User
+from src.retrieval import RetrievalError, retrieve_semantic_message_context
 
 
 class ContextError(Exception):
@@ -75,13 +76,18 @@ class ChatMessage(BaseModel):
 
 
 class ConversationContext(BaseModel):
-    """Persisted summary, recent messages, and optional older lexical context."""
+    """Persisted summary plus bounded context that predates the target interaction."""
 
     model_config = ConfigDict(extra="forbid")
 
     summary: str | None = None
     recent_messages: list[ChatMessage] = Field(default_factory=list)
     older_lexical_messages: list[ChatMessage] = Field(default_factory=list)
+    older_semantic_messages: list[ChatMessage] = Field(default_factory=list)
+    # This is the prompt-ready lexical/semantic union.  Branch fields remain
+    # inspectable for callers while the extractor receives one deduplicated set.
+    older_relevant_messages: list[ChatMessage] = Field(default_factory=list)
+    semantic_retrieval_error: str | None = None
 
     @field_validator("summary")
     @classmethod
@@ -162,6 +168,35 @@ def _target_lexical_query(targets: list[Message]) -> str:
     return " | ".join(terms)
 
 
+def _target_semantic_query(targets: list[Message]) -> str:
+    """Use one deterministic target-interaction query without rewriting it."""
+
+    user_text = [target.content for target in targets if target.role.value == "user"]
+    return "\n".join(user_text or [target.content for target in targets])
+
+
+def _merge_older_messages(
+    lexical_messages: list[Message],
+    semantic_messages: list[Message],
+    *,
+    limit: int,
+) -> list[Message]:
+    """Keep a bounded, deterministic UUID union readable in chronological order."""
+
+    selected: list[Message] = []
+    seen: set[str] = set()
+    for message in [*lexical_messages, *semantic_messages]:
+        message_id = str(message.id)
+        if message_id in seen:
+            continue
+        seen.add(message_id)
+        selected.append(message)
+        if len(selected) == limit:
+            break
+    selected.sort(key=lambda message: (message.created_at, str(message.id)))
+    return selected
+
+
 def build_extraction_context(
     db: Session,
     *,
@@ -171,6 +206,8 @@ def build_extraction_context(
     recent_message_limit: int | None = None,
     older_lexical_query: str | None = None,
     older_lexical_limit: int | None = None,
+    older_semantic_limit: int | None = None,
+    older_context_limit: int | None = None,
 ) -> ConversationContext:
     """Return only context that predates an application-selected target interaction.
 
@@ -189,10 +226,24 @@ def build_extraction_context(
         if older_lexical_limit is None
         else older_lexical_limit
     )
+    semantic_limit = (
+        get_config().extraction_semantic_messages
+        if older_semantic_limit is None
+        else older_semantic_limit
+    )
+    old_context_limit = (
+        get_config().extraction_old_messages
+        if older_context_limit is None
+        else older_context_limit
+    )
     if recent_limit < 1:
         raise ContextError("recent_message_limit must be greater than zero.")
     if lexical_limit < 1:
         raise ContextError("older_lexical_limit must be greater than zero.")
+    if semantic_limit < 1:
+        raise ContextError("older_semantic_limit must be greater than zero.")
+    if old_context_limit < 1:
+        raise ContextError("older_context_limit must be greater than zero.")
     if older_lexical_query is not None and not older_lexical_query.strip():
         raise ContextError("older_lexical_query must not be empty or whitespace-only.")
 
@@ -260,6 +311,36 @@ def build_extraction_context(
             )
         )
         older_lexical_messages.sort(key=lambda message: (message.created_at, str(message.id)))
+
+    # Semantic message context is an optional enhancement.  It remains scoped
+    # to this conversation, excludes target/recent rows, and can fail without
+    # making the safe summary/lexical/recent context unavailable.
+    older_semantic_messages: list[Message] = []
+    semantic_retrieval_error: str | None = None
+    try:
+        older_semantic_messages = retrieve_semantic_message_context(
+            db,
+            user_external_id=user_external_id,
+            conversation_external_id=conversation_external_id,
+            query_text=_target_semantic_query(targets),
+            limit=semantic_limit,
+            exclude_message_ids={
+                *(str(message.id) for message in targets),
+                *(str(message.id) for message in recent_messages),
+            },
+            before_message_id=str(first_target.id),
+        )
+    except RetrievalError as error:
+        # RetrievalError messages intentionally contain only safe categories,
+        # so callers can observe graceful degradation without leaking provider
+        # responses, credentials, or filesystem details.
+        semantic_retrieval_error = str(error)
+
+    older_relevant_messages = _merge_older_messages(
+        older_lexical_messages,
+        older_semantic_messages,
+        limit=old_context_limit,
+    )
     persisted_summary = db.scalar(
         select(ConversationSummary).where(ConversationSummary.conversation_id == conversation.id)
     )
@@ -274,4 +355,13 @@ def build_extraction_context(
             ChatMessage(role=message.role.value, content=message.content)
             for message in older_lexical_messages
         ],
+        older_semantic_messages=[
+            ChatMessage(role=message.role.value, content=message.content)
+            for message in older_semantic_messages
+        ],
+        older_relevant_messages=[
+            ChatMessage(role=message.role.value, content=message.content)
+            for message in older_relevant_messages
+        ],
+        semantic_retrieval_error=semantic_retrieval_error,
     )

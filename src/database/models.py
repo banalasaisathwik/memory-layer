@@ -88,6 +88,10 @@ class Message(Base):
     conversation_id: Mapped[UUID] = mapped_column(ForeignKey("conversations.id"), index=True)
     role: Mapped[MessageRole] = mapped_column(message_role_enum)
     content: Mapped[str] = mapped_column(Text)
+    # Raw-message vectors are durable context infrastructure.  They are kept
+    # separate from Memory vectors because this index is conversation-scoped.
+    embedding: Mapped[list[float] | None] = mapped_column(embedding_type, nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")

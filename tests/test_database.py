@@ -107,6 +107,10 @@ def test_schema_constraints_and_indexes() -> None:
         for index in summary_indexes
     )
 
+    message_columns = {column["name"]: column for column in inspector.get_columns("messages")}
+    assert message_columns["embedding"]["nullable"] is True
+    assert message_columns["embedding_model"]["nullable"] is True
+
 
 def test_user_owns_conversations_and_messages() -> None:
     external_suffix = uuid4().hex

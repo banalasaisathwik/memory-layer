@@ -4,7 +4,7 @@
 
 Memory Layer is a reusable memory infrastructure package for applications using LLMs. It is not an agent framework, a chatbot, a Context Builder, or a document RAG platform.
 
-Milestone 1 established configuration, provider client construction, PostgreSQL connectivity, and durable relational models. Milestone 2 adds deterministic candidate-memory identity. Milestone 3 adds bounded LLM extraction into validated `CandidateMemory` objects. Milestone 4 adds validated, deterministic PostgreSQL writes and temporal supersession. Milestone 5 adds bounded conversation context, a single rolling summary per conversation, and Alembic schema migrations. Milestone 6 adds user-scoped hybrid retrieval over durable `Memory` rows.
+Milestone 1 established configuration, provider client construction, PostgreSQL connectivity, and durable relational models. Milestone 2 adds deterministic candidate-memory identity. Milestone 3 adds bounded LLM extraction into validated `CandidateMemory` objects. Milestone 4 adds validated, deterministic PostgreSQL writes and temporal supersession. Milestone 5 adds bounded conversation context, a single rolling summary per conversation, and Alembic schema migrations. Milestone 6 adds user-scoped hybrid retrieval over durable `Memory` rows. Milestone 6.1 adds conversation-scoped semantic raw-message lookup only for pre-extraction context.
 
 ## Current boundary
 
@@ -65,8 +65,9 @@ Milestone 5 adds only bounded context for interpreting a current interaction. It
 Conversation history
         |
         |-- rolling summary ---------+
-        |-- recent messages ---------+
-        `-- older lexical matches ---+
+        |-- recent messages --------------------------+
+        |-- older lexical Message matches ------------+
+        `-- older semantic Message matches (FAISS) ---+
                                   | CONTEXT ONLY
 Latest interaction ----------------+
                                   |
@@ -81,17 +82,17 @@ Latest interaction ----------------+
 
 `ConversationSummary` is a compact conversational aid, not durable memory. In particular, **summary != memory**: the summary is neither searched as long-term memory nor a replacement for the `Memory` table.
 
-`build_extraction_context()` requires both user and conversation external IDs, resolves one unambiguous conversation within that user scope, loads its one persisted summary if present, and selects only a small chronological window of messages that precede the designated target IDs. Its optional `older_lexical_query` overrides the deterministic default query made from up to twelve de-duplicated non-filler target terms joined with lexical OR. The query performs a bounded PostgreSQL full-text lexical lookup over older raw messages, excluding both targets and the recent window; selected matches are then ordered chronologically for prompt readability. This deliberately lexical approach cannot resolve references without shared terms (for example, "that deployment thing" versus "Atlas service"). It preserves the conceptual order: rolling summary, recent raw messages, older lexical matches, then target interaction. Defaults are six recent messages and three lexical matches, configured with `EXTRACTION_RECENT_MESSAGES` and `EXTRACTION_LEXICAL_MESSAGES`.
+`build_extraction_context()` requires both user and conversation external IDs, resolves one unambiguous conversation within that user scope, loads its one persisted summary if present, and selects only a small chronological window of messages that precede the designated target IDs. Its optional `older_lexical_query` overrides the deterministic default query made from up to twelve de-duplicated non-filler target terms joined with lexical OR. The lexical query performs a bounded PostgreSQL full-text lookup over older raw messages, excluding both targets and the recent window. The semantic branch makes one deterministic embedding query from the user-side target text when present (otherwise the target interaction), retrieves only the owned conversation's FAISS candidates, then resolves UUIDs and exclusions through PostgreSQL. Lexical and semantic selections are deduplicated by Message UUID, capped, and ordered chronologically for prompt readability. Defaults are six recent messages, three lexical matches, three semantic matches, and a final six-message old-context cap, configured with `EXTRACTION_RECENT_MESSAGES`, `EXTRACTION_LEXICAL_MESSAGES`, `EXTRACTION_SEMANTIC_MESSAGES`, and `EXTRACTION_OLD_MESSAGES`.
 
-The extractor receives four explicitly labeled sections: `CONVERSATION SUMMARY — CONTEXT ONLY`, `RECENT CONTEXT — CONTEXT ONLY`, `OLDER LEXICAL CONTEXT — CONTEXT ONLY`, and `TARGET INTERACTION`. Context helps interpretation; the target provides all new-memory evidence. Therefore only application-supplied target IDs become candidate provenance—summary, recent context, and lexical-match IDs are never attached to a new `Memory`.
+The extractor receives four explicitly labeled sections: `CONVERSATION SUMMARY — CONTEXT ONLY`, `RELEVANT OLDER CONTEXT — CONTEXT ONLY`, `RECENT CONTEXT — CONTEXT ONLY`, and `TARGET INTERACTION`. Relevant older context is a lexical/semantic Message union; it helps interpretation but is never independent evidence. The target provides all new-memory evidence, and overrides conflicting context. Therefore only application-supplied target IDs become candidate provenance—summary, recent context, and every older-match ID are never attached to a new `Memory`.
 
-This is conversation-context retrieval only. It intentionally uses no embeddings, FAISS, or semantic raw-message retrieval; semantic older-message retrieval remains a deliberately separate follow-up after Milestone 6.
+This is conversation-context retrieval only. It does not retrieve long-term `Memory` rows, query other conversations for the same user, or merge the Message and Memory FAISS indexes. Semantic lookup is an optional enhancement: if its provider or derived index fails, `build_extraction_context()` preserves the summary, lexical, and recent context and returns a sanitized `semantic_retrieval_error` for the caller to observe.
 
 `update_conversation_summary()` requires the same user and conversation scope and maintains one row per conversation. It retains the newest `SUMMARY_RECENT_KEEP` messages outside the summary (default 6), and calls the provider only once the remaining eligible history reaches `SUMMARY_TRIGGER_MESSAGES` (default 20). An update sends the prior summary plus only messages that became newly eligible, then advances `covered_through_message_id`; it never resends the entire conversation after the initial summary. Empty output, provider failure, an invalid coverage marker, or persistence failure raises `SummaryError` and rolls back the attempted write.
 
 ## Alembic migration strategy
 
-`alembic/` is a conventional Alembic environment wired to `Base.metadata`. A new PostgreSQL/Neon database uses `python -m alembic upgrade head`. For an existing, verified Milestones 1-4 database created by `create_tables()`, first make a backup, run `python -m alembic stamp 0001_initial_schema`, then run `python -m alembic upgrade head`. The second revision adds `conversation_summaries` and converts `memories.importance` with `importance::double precision`; it does not recreate existing data. The third revision adds nullable JSONB `embedding`, nullable `embedding_model`, and the `simple`-configuration GIN expression index over `memories.memory_text`; it never makes an embedding-provider request.
+`alembic/` is a conventional Alembic environment wired to `Base.metadata`. A new PostgreSQL/Neon database uses `python -m alembic upgrade head`. For an existing, verified Milestones 1-4 database created by `create_tables()`, first make a backup, run `python -m alembic stamp 0001_initial_schema`, then run `python -m alembic upgrade head`. The second revision adds `conversation_summaries` and converts `memories.importance` with `importance::double precision`; it does not recreate existing data. The third revision adds nullable JSONB `embedding`, nullable `embedding_model`, and the `simple`-configuration GIN expression index over `memories.memory_text`; it never makes an embedding-provider request. The fourth revision adds nullable JSONB `messages.embedding` and nullable `messages.embedding_model`; it also never calls an embedding provider. Migrations continue to use `DIRECT_URL` and then `DATABASE_URL`; a dedicated test migration must explicitly provide its test URL as the migration URL.
 
 The Milestone 5 downgrade is intentionally unsupported because a FLOAT-to-integer conversion could discard fractional importance values. The Milestone 6 downgrade is also unsupported because it would discard durable embeddings. Do not use migration commands against an unverified database. Application migrations never read `TEST_DATABASE_URL`; any migration verification against a dedicated test database must explicitly supply that test URL.
 
@@ -179,6 +180,8 @@ PostgreSQL is authoritative. It stores memory text, structure, temporal state, n
 
 FAISS is derived local search state, never the only copy of a vector or identity. Each V1 index belongs to exactly one user, not a conversation, and uses a SHA-256 user fingerprint rather than the raw external ID in its filenames. The persisted JSON metadata contains the fingerprint, embedding model, embedding dimension, and the position-to-memory-UUID list needed by `IndexFlatIP`. Candidate UUIDs are always resolved and state-filtered through PostgreSQL before they become results.
 
+This long-term Memory index is intentionally distinct from Milestone 6.1 Message context indexes. `Memory` FAISS is per user because long-term facts may cross sessions. `Message` FAISS is per conversation because it resolves references inside that conversation only. Message filenames use a separate `messages/` namespace and a SHA-256 fingerprint of the user/conversation scope; metadata validates both fingerprints, model, dimension, and position-to-Message-UUID mapping. Both types are derived from PostgreSQL's durable embeddings, but they are never merged.
+
 `IndexFlatIP` over normalized vectors is an exact cosine-similarity scan, not approximate nearest-neighbor search. Its per-query work is roughly `O(N * embedding_dimension)` for that user's indexed memories. This V1 choice is deliberately simple and testable. Missing, corrupt, stale, or model-mismatched FAISS files are rebuilt from PostgreSQL; a query/index dimension mismatch is rejected before FAISS search. A model change causes rows without the current model to be re-embedded before rebuild. The writer remains independent of this work, so a successful memory write does not depend on vector availability.
 
 The index may contain historical rows, but default retrieval always requires `is_active = true`. Setting `include_history=True` makes inactive/superseded rows eligible. Vector retrieval oversamples a small multiple of the requested limit before PostgreSQL filters historical rows, so historical candidates do not unnecessarily consume the final result window.
@@ -192,7 +195,7 @@ The branches have incompatible raw score scales (structured ordering, PostgreSQL
 - Structured filters are caller-supplied; natural-language structure inference is not implemented.
 - Importance, recency, and branch behavior are not yet benchmark-calibrated.
 - Historical vectors can require oversampling before active-state filtering.
-- Semantic retrieval of raw `Message` context is intentionally deferred; the vector helpers can be reused without turning this package into a generic framework.
+- Cross-conversation raw-message semantic retrieval, global Message indexes, ANN variants, reranking, and query rewriting are intentionally deferred.
 
 ## Design principles
 
