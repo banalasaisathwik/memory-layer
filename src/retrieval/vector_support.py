@@ -9,14 +9,17 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from hashlib import sha256
+import json
 import math
+import os
 from pathlib import Path
 import tempfile
 from typing import Any
 
+import faiss
 import numpy as np
 
-from .errors import EmbeddingError, InvalidEmbeddingError
+from .errors import EmbeddingError, IndexStateError, InvalidEmbeddingError
 
 
 def safe_fingerprint(value: str) -> str:
@@ -68,3 +71,70 @@ def temporary_path(directory: Path, suffix: str) -> Path:
     handle = tempfile.NamedTemporaryFile(dir=directory, suffix=suffix, delete=False)
     handle.close()
     return Path(handle.name)
+
+
+def persist_index(
+    *,
+    index: Any,
+    index_path: Path,
+    metadata_path: Path,
+    metadata: dict[str, object],
+    error_message: str,
+) -> None:
+    """Persist a FAISS index and its metadata with replace-on-complete durability.
+
+    Both files are written to sibling temporary paths first and only replace
+    the real files after both writes succeed, so a concurrent reader never
+    observes a FAISS index without its matching position-mapping metadata (or
+    vice versa). Identical for the Memory and Message indexes; only the
+    metadata contents differ, and building that dict remains the caller's job.
+    """
+
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_index = temporary_path(index_path.parent, ".faiss.tmp")
+    temporary_metadata = temporary_path(index_path.parent, ".json.tmp")
+    try:
+        faiss.write_index(index, str(temporary_index))
+        temporary_metadata.write_text(json.dumps(metadata, separators=(",", ":")), encoding="utf-8")
+        os.replace(temporary_index, index_path)
+        os.replace(temporary_metadata, metadata_path)
+    except Exception as error:
+        raise IndexStateError(error_message) from error
+    finally:
+        for path in (temporary_index, temporary_metadata):
+            if path.exists():
+                path.unlink(missing_ok=True)
+
+
+def load_and_validate_index(
+    *,
+    index_path: Path,
+    metadata_path: Path,
+    missing_message: str,
+    corrupt_message: str,
+    validate_metadata: Callable[[dict[str, Any]], tuple[list[str], int]],
+) -> tuple[Any, list[str], int]:
+    """Load one FAISS index plus its JSON metadata and cross-check their shape.
+
+    ``validate_metadata`` receives the parsed metadata dict and must return
+    ``(ids, dimension)`` after checking the caller's own scope/model/format
+    fields, raising IndexStateError (or a subclass, e.g. for a model
+    mismatch) for anything invalid. That keeps each index kind's specific
+    checks and exception types next to its own metadata contract; only the
+    identical file-existence check, JSON load, FAISS read, and final
+    index-vs-mapping shape check live here.
+    """
+
+    if not index_path.is_file() or not metadata_path.is_file():
+        raise IndexStateError(missing_message)
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        ids, dimension = validate_metadata(metadata)
+        index = faiss.read_index(str(index_path))
+        if index.d != dimension or index.ntotal != len(ids):
+            raise IndexStateError(corrupt_message)
+    except IndexStateError:
+        raise
+    except Exception as error:
+        raise IndexStateError(corrupt_message) from error
+    return index, ids, dimension

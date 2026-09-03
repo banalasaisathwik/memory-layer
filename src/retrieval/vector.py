@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -29,9 +27,10 @@ from .schemas import SearchFilters
 from .structured import memory_filter_conditions
 from .vector_support import (
     embedding_response_vectors,
+    load_and_validate_index,
     normalize_embedding,
+    persist_index,
     safe_fingerprint,
-    temporary_path,
 )
 
 
@@ -139,10 +138,6 @@ def _validated_memory_matrix(memories: list[Memory], *, model: str) -> np.ndarra
     return np.vstack(vectors).astype(np.float32)
 
 
-def _temporary_path(directory: Path, suffix: str) -> Path:
-    return temporary_path(directory, suffix)
-
-
 def _persist_user_index(
     *,
     user_external_id: str,
@@ -154,7 +149,6 @@ def _persist_user_index(
     """Persist index and position mapping with replace-on-complete files."""
 
     index_path, metadata_path = user_index_paths(user_external_id)
-    index_path.parent.mkdir(parents=True, exist_ok=True)
     metadata = {
         "format_version": _INDEX_FORMAT_VERSION,
         "user_fingerprint": _user_fingerprint(user_external_id),
@@ -162,19 +156,13 @@ def _persist_user_index(
         "embedding_dimension": dimension,
         "memory_ids": memory_ids,
     }
-    temporary_index = _temporary_path(index_path.parent, ".faiss.tmp")
-    temporary_metadata = _temporary_path(index_path.parent, ".json.tmp")
-    try:
-        faiss.write_index(index, str(temporary_index))
-        temporary_metadata.write_text(json.dumps(metadata, separators=(",", ":")), encoding="utf-8")
-        os.replace(temporary_index, index_path)
-        os.replace(temporary_metadata, metadata_path)
-    except Exception as error:
-        raise IndexStateError("The per-user FAISS index could not be persisted.") from error
-    finally:
-        for temporary_path in (temporary_index, temporary_metadata):
-            if temporary_path.exists():
-                temporary_path.unlink(missing_ok=True)
+    persist_index(
+        index=index,
+        index_path=index_path,
+        metadata_path=metadata_path,
+        metadata=metadata,
+        error_message="The per-user FAISS index could not be persisted.",
+    )
     return index_path
 
 
@@ -187,10 +175,8 @@ def load_user_memory_index(
 
     expected_model = embedding_model or get_config().embedding_model
     index_path, metadata_path = user_index_paths(user_external_id)
-    if not index_path.is_file() or not metadata_path.is_file():
-        raise IndexStateError("The per-user FAISS index is missing and must be synchronized.")
-    try:
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    def _validate_metadata(metadata: dict[str, Any]) -> tuple[list[str], int]:
         if metadata.get("format_version") != _INDEX_FORMAT_VERSION:
             raise IndexStateError("The per-user FAISS metadata format is unsupported.")
         if metadata.get("user_fingerprint") != _user_fingerprint(user_external_id):
@@ -205,13 +191,15 @@ def load_user_memory_index(
             raise IndexStateError("The per-user FAISS metadata has an invalid embedding dimension.")
         if not isinstance(memory_ids, list) or not all(isinstance(item, str) for item in memory_ids):
             raise IndexStateError("The per-user FAISS metadata has an invalid position mapping.")
-        index = faiss.read_index(str(index_path))
-        if index.d != dimension or index.ntotal != len(memory_ids):
-            raise IndexStateError("The FAISS index and its position mapping do not agree.")
-    except IndexStateError:
-        raise
-    except Exception as error:
-        raise IndexStateError("The per-user FAISS index or mapping is corrupt.") from error
+        return memory_ids, dimension
+
+    index, memory_ids, dimension = load_and_validate_index(
+        index_path=index_path,
+        metadata_path=metadata_path,
+        missing_message="The per-user FAISS index is missing and must be synchronized.",
+        corrupt_message="The per-user FAISS index or mapping is corrupt.",
+        validate_metadata=_validate_metadata,
+    )
     return UserVectorIndex(
         index=index,
         memory_ids=memory_ids,

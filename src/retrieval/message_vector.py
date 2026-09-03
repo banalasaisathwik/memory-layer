@@ -7,8 +7,6 @@ only provide pre-extraction context within the current conversation.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -33,9 +31,10 @@ from .errors import (
 )
 from .vector_support import (
     embedding_response_vectors,
+    load_and_validate_index,
     normalize_embedding,
+    persist_index,
     safe_fingerprint,
-    temporary_path,
 )
 
 
@@ -196,7 +195,6 @@ def _persist_conversation_message_index(
         user_external_id,
         conversation_external_id,
     )
-    index_path.parent.mkdir(parents=True, exist_ok=True)
     metadata = {
         "format_version": _INDEX_FORMAT_VERSION,
         "index_kind": "conversation_messages",
@@ -209,19 +207,13 @@ def _persist_conversation_message_index(
         "embedding_dimension": dimension,
         "message_ids": message_ids,
     }
-    temporary_index = temporary_path(index_path.parent, ".faiss.tmp")
-    temporary_metadata = temporary_path(index_path.parent, ".json.tmp")
-    try:
-        faiss.write_index(index, str(temporary_index))
-        temporary_metadata.write_text(json.dumps(metadata, separators=(",", ":")), encoding="utf-8")
-        os.replace(temporary_index, index_path)
-        os.replace(temporary_metadata, metadata_path)
-    except Exception as error:
-        raise IndexStateError("The per-conversation Message FAISS index could not be persisted.") from error
-    finally:
-        for path in (temporary_index, temporary_metadata):
-            if path.exists():
-                path.unlink(missing_ok=True)
+    persist_index(
+        index=index,
+        index_path=index_path,
+        metadata_path=metadata_path,
+        metadata=metadata,
+        error_message="The per-conversation Message FAISS index could not be persisted.",
+    )
     return index_path
 
 
@@ -238,10 +230,8 @@ def load_conversation_message_index(
         user_external_id,
         conversation_external_id,
     )
-    if not index_path.is_file() or not metadata_path.is_file():
-        raise IndexStateError("The per-conversation Message FAISS index is missing and must be synchronized.")
-    try:
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    def _validate_metadata(metadata: dict[str, Any]) -> tuple[list[str], int]:
         if metadata.get("format_version") != _INDEX_FORMAT_VERSION:
             raise IndexStateError("The per-conversation Message FAISS metadata format is unsupported.")
         if metadata.get("index_kind") != "conversation_messages":
@@ -263,13 +253,15 @@ def load_conversation_message_index(
             raise IndexStateError("The per-conversation Message FAISS metadata has an invalid embedding dimension.")
         if not isinstance(message_ids, list) or not all(isinstance(item, str) for item in message_ids):
             raise IndexStateError("The per-conversation Message FAISS metadata has an invalid position mapping.")
-        index = faiss.read_index(str(index_path))
-        if index.d != dimension or index.ntotal != len(message_ids):
-            raise IndexStateError("The Message FAISS index and position mapping do not agree.")
-    except IndexStateError:
-        raise
-    except Exception as error:
-        raise IndexStateError("The per-conversation Message FAISS index or mapping is corrupt.") from error
+        return message_ids, dimension
+
+    index, message_ids, dimension = load_and_validate_index(
+        index_path=index_path,
+        metadata_path=metadata_path,
+        missing_message="The per-conversation Message FAISS index is missing and must be synchronized.",
+        corrupt_message="The per-conversation Message FAISS index or mapping is corrupt.",
+        validate_metadata=_validate_metadata,
+    )
     return ConversationMessageVectorIndex(
         index=index,
         message_ids=message_ids,

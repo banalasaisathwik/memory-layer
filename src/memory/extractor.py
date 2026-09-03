@@ -50,20 +50,8 @@ def _request_content(
         return json.dumps(target_data, ensure_ascii=False)
 
     summary = context.summary if context.summary is not None else "(no persisted summary)"
-    # Production contexts carry a UUID-deduplicated union.  The small fallback
-    # preserves compatibility for callers constructing ConversationContext
-    # directly with the Milestone 5 lexical field.
-    relevant_messages = context.older_relevant_messages
-    if not relevant_messages:
-        relevant_messages = []
-        seen: set[tuple[str, str]] = set()
-        for message in [*context.older_lexical_messages, *context.older_semantic_messages]:
-            identity = (message.role, message.content)
-            if identity not in seen:
-                seen.add(identity)
-                relevant_messages.append(message)
     older_context = json.dumps(
-        {"messages": [message.model_dump() for message in relevant_messages]},
+        {"messages": [message.model_dump() for message in context.effective_older_messages()]},
         ensure_ascii=False,
     )
     recent_messages = json.dumps(

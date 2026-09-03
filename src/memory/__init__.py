@@ -6,7 +6,7 @@ from .fact_keys import build_fact_key, normalize_subject_type, normalize_value_i
 from .predicates import PREDICATE_ALIASES, PREDICATES, get_predicate_cardinality, resolve_predicate
 from .schemas import CandidateMemory
 from .summaries import SummaryError, update_conversation_summary
-from .writer import WriteAction, WriteError, WriteResult, write_memories
+from .writer import WriteAction, WriteConflictError, WriteError, WriteResult, write_memories
 from src.retrieval import retrieve_semantic_message_context
 
 __all__ = [
@@ -28,6 +28,7 @@ __all__ = [
     "resolve_predicate",
     "retrieve_semantic_message_context",
     "WriteAction",
+    "WriteConflictError",
     "WriteError",
     "WriteResult",
     "write_memories",

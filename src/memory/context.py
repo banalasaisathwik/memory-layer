@@ -98,6 +98,29 @@ class ConversationContext(BaseModel):
             raise ValueError("summary must not be empty or whitespace-only.")
         return value
 
+    def effective_older_messages(self) -> list[ChatMessage]:
+        """Return the prompt-ready older-context union.
+
+        build_extraction_context() always populates older_relevant_messages
+        with its UUID-deduplicated, chronologically bounded merge. A caller
+        that constructs ConversationContext directly with only the lexical and
+        semantic branch fields (for example, a test or a lightweight caller
+        that skips the full pipeline) gets an equivalent best-effort union
+        here, deduplicated by (role, content) since raw ChatMessage carries no
+        message ID or timestamp to merge on.
+        """
+
+        if self.older_relevant_messages:
+            return self.older_relevant_messages
+        merged: list[ChatMessage] = []
+        seen: set[tuple[str, str]] = set()
+        for message in [*self.older_lexical_messages, *self.older_semantic_messages]:
+            identity = (message.role, message.content)
+            if identity not in seen:
+                seen.add(identity)
+                merged.append(message)
+        return merged
+
 
 def _resolve_conversation(
     db: Session,

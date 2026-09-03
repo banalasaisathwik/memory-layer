@@ -166,3 +166,16 @@ Index(
     func.to_tsvector("simple", Memory.memory_text),
     postgresql_using="gin",
 )
+
+# Enforces "at most one active memory per (user_id, fact_key)" at the database
+# level. The writer's SELECT-then-write check alone cannot prevent two
+# concurrent transactions from both observing no conflict and both committing;
+# this partial unique index makes PostgreSQL reject the second commit instead.
+# Kept in metadata so create_tables() matches the Alembic schema.
+Index(
+    "ix_memories_active_user_fact_key",
+    Memory.user_id,
+    Memory.fact_key,
+    unique=True,
+    postgresql_where=Memory.is_active.is_(True) & Memory.fact_key.isnot(None),
+)

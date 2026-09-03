@@ -7,18 +7,45 @@ from dataclasses import dataclass
 from enum import Enum
 
 from sqlalchemy import select
-from sqlalchemy.exc import StatementError
+from sqlalchemy.exc import IntegrityError, StatementError
 from sqlalchemy.orm import Session
 
 from src.database.models import Conversation, Memory, MemoryType, Message, User, utcnow
 
 from .fact_keys import build_fact_key, normalize_subject_type, normalize_value_identity
-from .predicates import get_predicate_cardinality, resolve_predicate
+from .predicates import resolve_predicate
 from .schemas import CandidateMemory
 
 
 class WriteError(Exception):
     """Raised when a candidate cannot safely be written in its requested scope."""
+
+
+class WriteConflictError(WriteError):
+    """Raised when a concurrent writer already committed an active memory for this fact key.
+
+    The database's partial unique index on (user_id, fact_key) — not this
+    module's SELECT-then-write check — is the actual source of truth for "at
+    most one active memory per fact key". Two concurrent write_memories()
+    calls can both read no conflicting row and both attempt to commit; the
+    loser gets this error instead of silently creating a second active row.
+    The batch was fully rolled back, so it is safe for the caller to retry
+    the same candidates: a retry re-reads the row the winner committed and
+    produces NOOP or SUPERSEDE instead of racing again.
+    """
+
+
+# Must match the partial unique index created in
+# alembic/versions/0005_structured_fact_uniqueness.py and declared in
+# src/database/models.py so create_tables() and Alembic stay consistent.
+_ACTIVE_FACT_KEY_INDEX_NAME = "ix_memories_active_user_fact_key"
+
+
+def _is_active_fact_key_conflict(error: IntegrityError) -> bool:
+    """Identify only the specific active-fact-key race, never other integrity errors."""
+
+    diagnostics = getattr(error.orig, "diag", None)
+    return getattr(diagnostics, "constraint_name", None) == _ACTIVE_FACT_KEY_INDEX_NAME
 
 
 class WriteAction(str, Enum):
@@ -301,9 +328,12 @@ def _write_candidate(
         raise WriteError("More than one active memory exists for the same scoped fact key.")
 
     existing = active_memories[0]
-    if get_predicate_cardinality(predicate) == "multi" or (
-        normalize_value_identity(existing.value) == normalize_value_identity(memory.value)
-    ):
+    # For a multi-cardinality predicate, build_fact_key() already folds the
+    # normalized value identity into fact_key, so a fact_key match here always
+    # implies equal value identity. Only single-cardinality predicates can
+    # reach this point with differing values, which is what this comparison
+    # actually distinguishes (NOOP vs. SUPERSEDE).
+    if normalize_value_identity(existing.value) == normalize_value_identity(memory.value):
         _merge_provenance(existing, source_message_ids)
         return WriteResult(
             action=WriteAction.NOOP,
@@ -314,11 +344,17 @@ def _write_candidate(
         )
 
     boundary = utcnow()
+    # Deactivate and flush the old row before inserting the new one. The
+    # partial unique index on (user_id, fact_key) WHERE is_active is checked
+    # per statement, not deferred to commit: inserting the new active row
+    # first would transiently leave two active rows for this fact key within
+    # this same transaction and be rejected by that index.
+    existing.is_active = False
+    existing.valid_to = boundary
+    db.flush()
     memory.valid_from = boundary
     db.add(memory)
     db.flush()
-    existing.is_active = False
-    existing.valid_to = boundary
     existing.superseded_by_id = memory.id
     return WriteResult(
         action=WriteAction.SUPERSEDE,
@@ -340,7 +376,10 @@ def write_memories(
 
     The caller must pass an existing user and, when supplied, a conversation
     owned by that user. Any validation or database failure rolls back the whole
-    batch, including an in-progress supersession.
+    batch, including an in-progress supersession. A concurrent writer that
+    commits an active memory for the same (user_id, fact_key) first causes
+    this batch to roll back entirely and raise WriteConflictError; the caller
+    may safely retry the same candidates.
     """
 
     try:
@@ -356,6 +395,13 @@ def write_memories(
         ]
         db.commit()
         return results
+    except IntegrityError as error:
+        db.rollback()
+        if _is_active_fact_key_conflict(error):
+            raise WriteConflictError(
+                "Another write already committed an active memory for the same fact key; retry this batch."
+            ) from error
+        raise
     except Exception:
         db.rollback()
         raise
