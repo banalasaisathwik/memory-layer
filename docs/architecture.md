@@ -197,6 +197,32 @@ The branches have incompatible raw score scales (structured ordering, PostgreSQL
 - Historical vectors can require oversampling before active-state filtering.
 - Cross-conversation raw-message semantic retrieval, global Message indexes, ANN variants, reranking, and query rewriting are intentionally deferred.
 
+## Public facade
+
+`src.memory_layer.MemoryLayer` is a small orchestration layer over the pipeline above, not a new subsystem. It exists because an application should not need to understand or manually sequence extraction, context, the deterministic writer, summaries, and retrieval to use durable memory.
+
+```text
+MemoryLayer.add()
+      |
+resolve/create User, Conversation
+      |
+persist Message rows
+      |
+split into bounded user/assistant interactions
+      |
+build_extraction_context() + extract_memories() + write_memories() per interaction
+      |
+update_conversation_summary()
+      |
+AddResult
+```
+
+`add()` groups the messages passed to one call deterministically: a user message immediately followed by an assistant message is one two-message interaction; any other message (a standalone user message, a trailing user message with no reply yet, or a lone assistant message) is its own one-message interaction. Only the real, persisted `Message` IDs of each interaction become that interaction's candidate provenance, matching the existing target-only provenance rule. A missing `User` or `Conversation` is created automatically, scoped by `user_id` exactly as the writer already scopes it, so two different users may reuse the same `conversation_id` without collision.
+
+`update_conversation_summary()` is called once per `add()`, after every interaction in that call has been extracted and written, using the same trigger logic described above (`summary_trigger_messages`, `summary_recent_keep`) -- summary generation is not conditioned on whether a memory happened to be written. A `SummaryError` is caught at the facade boundary only: it is reported through `AddResult.warnings` (`"summary_update_failed"`) and `summary_updated = False` rather than raised, because `write_memories()` already committed its own batch per interaction and a downstream summary failure must not appear to undo that durable write. Every other failure -- message persistence, extraction, or the writer -- propagates as its existing typed error (a database error, `ExtractionError`, `WriteError`/`WriteConflictError`) rather than being swallowed.
+
+`MemoryLayer.search()` is a direct, unmodified call to `search_memories()`; the facade changes nothing about ranking, filters, or scoring. `MemoryLayer.answer()` calls `search()` and, only when it returns at least one hit, sends the retrieved memories to an LLM reader as a small locally-referenced list (`M0`, `M1`, ...) labeled active or historical, instructed to answer only from that evidence and to reply with the literal token `UNKNOWN` when it is insufficient. `supporting_memory_ids` is always the full retrieved set used as context, not an LLM-chosen subset, so the model is never asked to invent or select memory IDs. `add()`/`search()`/`answer()` add no semantic-quality behavior of their own -- no dedup, retraction, recency weighting, or reranking -- so the Smoke benchmark, driven directly through the underlying functions, remains a meaningful comparison.
+
 ## Design principles
 
 - LLMs perform semantic judgment; deterministic code validates and executes decisions.

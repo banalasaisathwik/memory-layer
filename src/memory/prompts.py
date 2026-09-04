@@ -1,4 +1,4 @@
-"""Version-controlled prompts for the bounded memory extraction stage."""
+"""Version-controlled prompts for the bounded memory extraction, summary, and answer-reader stages."""
 
 from __future__ import annotations
 
@@ -53,4 +53,14 @@ SUMMARY_SYSTEM_PROMPT = """You maintain a compact rolling summary of conversatio
 The input provides an optional previous summary and only newly eligible older messages. Return only the updated plain-text summary, with no JSON, markdown heading, or commentary.
 
 Preserve important entities, ongoing topics, decisions, unresolved context, and references that may help interpret future turns. Do not invent facts, duplicate the transcript, include filler, or preserve secrets, credentials, passwords, API keys, or unnecessary stylistic detail. This summary is conversational context only, not a source of durable memory facts.
+"""
+
+
+ANSWER_READER_SYSTEM_PROMPT = """You answer one question using only the supplied retrieved memories.
+
+The input is a JSON object with "query" and "memories". Each memory has a local "ref", its "text", and a "status" of "active" or "historical". A "historical" memory has been superseded and is no longer current: do not treat it as present-tense truth unless the question explicitly asks about the past.
+
+Answer using only information contained in these memories. Do not invent, assume, or add any fact that is not directly supported by them. If the memories do not contain enough information to answer the question, respond with exactly the single word UNKNOWN and nothing else.
+
+Otherwise, respond with a concise one or two sentence plain-text answer and nothing else: no JSON, no markdown, no memory refs, no restatement of the question.
 """

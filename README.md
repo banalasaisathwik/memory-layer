@@ -1,12 +1,49 @@
 # Memory Layer
 
-Memory Layer is a small, reusable foundation for applications that need durable, user-scoped long-term memory. It implements the Milestone 1 foundation (configuration, lazy OpenAI-compatible provider clients, a Neon/PostgreSQL connection layer, and the initial SQLAlchemy schema), Milestone 2 deterministic candidate-memory identity, Milestone 3 bounded LLM extraction into validated candidates, Milestone 4 validated PostgreSQL writes with temporal supersession, Milestone 5 bounded conversation context with rolling summaries, Milestone 6 hybrid memory retrieval, and Milestone 6.1 semantic old-message context retrieval.
+Memory Layer is a small, reusable foundation for applications that need durable, user-scoped long-term memory. It implements the Milestone 1 foundation (configuration, lazy OpenAI-compatible provider clients, a Neon/PostgreSQL connection layer, and the initial SQLAlchemy schema), Milestone 2 deterministic candidate-memory identity, Milestone 3 bounded LLM extraction into validated candidates, Milestone 4 validated PostgreSQL writes with temporal supersession, Milestone 5 bounded conversation context with rolling summaries, Milestone 6 hybrid memory retrieval, Milestone 6.1 semantic old-message context retrieval, and Milestone 7 the public `MemoryLayer` facade.
 
 `extract_memories()` accepts one current user/assistant interaction and returns validated `CandidateMemory` proposals. It can additionally receive a `ConversationContext` containing a rolling summary, recent pre-target messages, and a bounded deduplicated union of lexical and semantic older raw-message matches. That context may resolve references, but the target interaction remains the only source of evidence for a new memory. It does not write to PostgreSQL, generate fact keys or canonical subject IDs, decide mutations, generate embeddings, or retrieve long-term memories. Source message IDs remain application-owned provenance and are deterministically attached after model output is validated.
 
 `write_memories()` validates the existing user, optional conversation, and message provenance before deterministically writing a batch. Known structured facts use exact scoped identity to ADD, NOOP, or SUPERSEDE while preserving historical rows. Open semantic memories use exact normalized-text deduplication only. The write path never calls retrieval, FAISS, or an embedding provider.
 
 `search_memories()` reads the durable `Memory` table through deterministic structured lookup, PostgreSQL full-text search, and exact per-user FAISS cosine search. The results are combined with Reciprocal Rank Fusion, and every public search is scoped to one existing user.
+
+## Quick Start
+
+Most applications do not need to call extraction, context, write, and summary functions individually. `MemoryLayer` is a small facade over that existing pipeline:
+
+```python
+from src import MemoryLayer
+from src.database import SessionLocal
+
+db = SessionLocal()
+memory = MemoryLayer(db)
+
+result = memory.add(
+    user_id="user_123",
+    conversation_id="conv_1",
+    messages=[{"role": "user", "content": "I prefer PostgreSQL."}],
+)
+
+hits = memory.search(
+    user_id="user_123",
+    query="Which database does the user prefer?",
+    limit=5,
+)
+
+answer = memory.answer(
+    user_id="user_123",
+    query="Which database does the user prefer?",
+    limit=5,
+)
+print(answer.answer)
+```
+
+- `add()` = ingest chat messages, extract candidate memories, write them, and update the rolling summary when enough new history has accumulated. It creates the `User`/`Conversation` scope automatically if it does not already exist, and returns an `AddResult` (`message_ids`, `write_results`, `summary_updated`, `warnings`, `extracted_candidate_count`).
+- `search()` = raw memory retrieval; a thin wrapper over `search_memories()` with unchanged ranking.
+- `answer()` = a convenience LLM reader over `search()` results. It abstains (`AnswerResult.abstained = True`) without an LLM call when nothing is retrieved, and its reader prompt is grounded strictly in the retrieved memory text.
+
+`MemoryLayer` does not replace the lower-level functions below; it calls them. Use `build_extraction_context()`, `extract_memories()`, `write_memories()`, `update_conversation_summary()`, and `search_memories()` directly when an application needs finer control over one step.
 
 ## Prerequisites
 
