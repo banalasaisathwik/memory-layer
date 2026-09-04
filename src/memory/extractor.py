@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, TypeAdapter, ValidationError
@@ -84,11 +85,30 @@ def _response_content(response: Any) -> str | None:
     return content if isinstance(content, str) else None
 
 
+_OUTER_MARKDOWN_FENCE = re.compile(r"```(?:json)?[ \t]*\r?\n(?P<body>.*)\n```", re.IGNORECASE | re.DOTALL)
+
+
+def _strip_outer_markdown_fence(content: str) -> str:
+    """Remove exactly one outer ```json / ``` fence; anything else is left untouched.
+
+    This is a narrow portability accommodation: some OpenAI-compatible models
+    wrap otherwise-valid JSON in a single markdown code fence despite being
+    instructed to return raw JSON. Content must fully match "one fence wrapping
+    everything" to be touched at all -- prose before or after the fence, extra
+    fences, or an unterminated fence all fail to match and are passed through
+    unchanged, so they still fail json.loads() as a genuine extraction error.
+    """
+
+    match = _OUTER_MARKDOWN_FENCE.fullmatch(content)
+    return match.group("body") if match else content
+
+
 def _parse_result(content: str) -> ExtractionResult:
     """Parse strict JSON and reject any response field outside the LLM contract."""
 
+    candidate = _strip_outer_markdown_fence(content.strip())
     try:
-        payload = json.loads(content)
+        payload = json.loads(candidate)
     except json.JSONDecodeError as error:
         raise ExtractionError("LLM extraction returned invalid JSON.") from error
 

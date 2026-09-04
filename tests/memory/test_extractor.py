@@ -207,6 +207,62 @@ def test_invalid_json_raises_an_extraction_error(fake_completions: FakeCompletio
         extract_memories([{"role": "user", "content": "I prefer PostgreSQL."}])
 
 
+def test_fenced_json_with_language_tag_is_parsed(fake_completions: FakeCompletions) -> None:
+    body = json.dumps({"memories": [{"memory_text": "User prefers PostgreSQL"}]})
+    fake_completions.content = f"```json\n{body}\n```"
+
+    memories = extract_memories([{"role": "user", "content": "I prefer PostgreSQL."}])
+
+    assert len(memories) == 1
+    assert memories[0].memory_text == "User prefers PostgreSQL"
+
+
+def test_fenced_json_without_language_tag_is_parsed(fake_completions: FakeCompletions) -> None:
+    body = json.dumps({"memories": [{"memory_text": "User prefers PostgreSQL"}]})
+    fake_completions.content = f"```\n{body}\n```"
+
+    memories = extract_memories([{"role": "user", "content": "I prefer PostgreSQL."}])
+
+    assert len(memories) == 1
+    assert memories[0].memory_text == "User prefers PostgreSQL"
+
+
+def test_fenced_json_tolerates_surrounding_whitespace(fake_completions: FakeCompletions) -> None:
+    body = json.dumps({"memories": []})
+    fake_completions.content = f"  \n```json\n{body}\n```\n  "
+
+    assert extract_memories([{"role": "user", "content": "Thanks!"}]) == []
+
+
+def test_malformed_fenced_json_still_fails(fake_completions: FakeCompletions) -> None:
+    fake_completions.content = "```json\nnot valid json\n```"
+
+    with pytest.raises(ExtractionError, match="invalid JSON"):
+        extract_memories([{"role": "user", "content": "I prefer PostgreSQL."}])
+
+
+def test_valid_json_with_trailing_prose_still_fails(fake_completions: FakeCompletions) -> None:
+    fake_completions.content = json.dumps({"memories": []}) + "\nHope this helps!"
+
+    with pytest.raises(ExtractionError, match="invalid JSON"):
+        extract_memories([{"role": "user", "content": "I prefer PostgreSQL."}])
+
+
+def test_valid_json_with_leading_prose_still_fails(fake_completions: FakeCompletions) -> None:
+    fake_completions.content = "Here is the JSON:\n" + json.dumps({"memories": []})
+
+    with pytest.raises(ExtractionError, match="invalid JSON"):
+        extract_memories([{"role": "user", "content": "I prefer PostgreSQL."}])
+
+
+def test_fenced_json_followed_by_trailing_prose_still_fails(fake_completions: FakeCompletions) -> None:
+    body = json.dumps({"memories": []})
+    fake_completions.content = f"```json\n{body}\n```\nHope this helps!"
+
+    with pytest.raises(ExtractionError, match="invalid JSON"):
+        extract_memories([{"role": "user", "content": "I prefer PostgreSQL."}])
+
+
 def test_missing_top_level_memories_fails(fake_completions: FakeCompletions) -> None:
     with pytest.raises(ExtractionError, match="required schema"):
         _extract(fake_completions, {"candidates": []})

@@ -108,23 +108,34 @@ def _resolve_conversation(
     user: User,
     conversation_external_id: str | None,
 ) -> Conversation | None:
+    """Resolve one unambiguous conversation inside the supplied user scope.
+
+    Conversation external IDs only need to be unique per user, not globally:
+    the lookup itself is scoped by user_id so two different users may both
+    use the same conversation external ID (e.g. an application-level "main"
+    convention) without colliding.
+    """
+
     if conversation_external_id is None:
         return None
 
     conversations = list(
         db.scalars(
-            select(Conversation).where(Conversation.external_id == conversation_external_id)
+            select(Conversation).where(
+                Conversation.external_id == conversation_external_id,
+                Conversation.user_id == user.id,
+            )
         )
     )
     if not conversations:
-        raise WriteError(f"No conversation exists for external ID {conversation_external_id!r}.")
+        raise WriteError(
+            f"No conversation exists for external ID {conversation_external_id!r} in the requested user scope."
+        )
     if len(conversations) > 1:
-        raise WriteError(f"Conversation external ID {conversation_external_id!r} is ambiguous.")
-
-    conversation = conversations[0]
-    if conversation.user_id != user.id:
-        raise WriteError("The supplied conversation does not belong to the requested user.")
-    return conversation
+        raise WriteError(
+            f"Conversation external ID {conversation_external_id!r} is ambiguous within the requested user scope."
+        )
+    return conversations[0]
 
 
 def _validate_source_messages(

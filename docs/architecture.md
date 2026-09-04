@@ -116,7 +116,7 @@ The LLM proposes only semantic content. The prompt requires strict JSON and inst
 
 The extractor uses the existing lazy OpenAI-compatible chat client with an ordinary chat completion and portable `json.loads` plus Pydantic validation. It intentionally does not depend on vendor-specific structured-output SDK helpers, so OpenAI, OpenRouter, and custom OpenAI-compatible endpoints use the same path.
 
-Malformed JSON, empty model content, provider failures, and schema violations raise an explicit extraction error; malformed output is never converted into a valid candidate.
+Malformed JSON, empty model content, provider failures, and schema violations raise an explicit extraction error; malformed output is never converted into a valid candidate. As a narrow portability accommodation, response content that is exactly one outer ```` ```json ```` / ```` ``` ```` markdown fence wrapping the entire response has that fence stripped before parsing, since some OpenAI-compatible models wrap otherwise-valid JSON this way despite being instructed not to. This is not a general repair pass: prose before or after the JSON, multiple fences, or a fence around invalid JSON are all still rejected as invalid JSON.
 
 ## Implemented write lifecycle
 
@@ -138,7 +138,7 @@ ADD / NOOP / SUPERSEDE
 PostgreSQL
 ```
 
-The writer resolves the requested `user_external_id` to an existing user. An optional conversation must exist and belong to that user. Every supplied source message must exist, belong to the same user, and, when a conversation is supplied, belong to that conversation. User scope is included in every active-memory lookup.
+The writer resolves the requested `user_external_id` to an existing user. An optional conversation must exist and belong to that user: the conversation lookup itself is scoped by `user_id`, so a conversation `external_id` only needs to be unique per user, not globally, and two different users may safely use the same conversation `external_id`. Every supplied source message must exist, belong to the same user, and, when a conversation is supplied, belong to that conversation. User scope is included in every active-memory lookup.
 
 For a candidate with `subject_type = user`, deterministic application context supplies `User.external_id` as `subject_id`. Known predicates are canonicalized through the predicate registry and can produce a fact key. Unknown predicates remain open semantic memories: their persisted `predicate`, `value`, and `fact_key` are `NULL` while the original `memory_text` is retained.
 

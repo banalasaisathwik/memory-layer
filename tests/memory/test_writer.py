@@ -154,7 +154,7 @@ def test_cross_user_conversation_and_provenance_are_rejected(db) -> None:
     foreign_conversation = _conversation(db, foreign_user)
     foreign_message = _message(db, foreign_conversation)
 
-    with pytest.raises(WriteError, match="does not belong to the requested user"):
+    with pytest.raises(WriteError, match="No conversation exists"):
         write_memories(
             db,
             [_candidate()],
@@ -168,6 +168,67 @@ def test_cross_user_conversation_and_provenance_are_rejected(db) -> None:
             [_candidate(source_message_ids=[str(foreign_message.id)])],
             user_external_id=owner.external_id,
         )
+
+
+def test_two_users_may_independently_use_the_same_conversation_external_id(db) -> None:
+    user_a = _user(db)
+    user_b = _user(db)
+    conversation_a = Conversation(external_id="main", user_id=user_a.id)
+    conversation_b = Conversation(external_id="main", user_id=user_b.id)
+    db.add_all([conversation_a, conversation_b])
+    db.commit()
+
+    result_a = write_memories(
+        db,
+        [_candidate(memory_text="User A prefers PostgreSQL", value="PostgreSQL")],
+        user_external_id=user_a.external_id,
+        conversation_external_id="main",
+    )[0]
+    result_b = write_memories(
+        db,
+        [_candidate(memory_text="User B prefers MongoDB", value="MongoDB")],
+        user_external_id=user_b.external_id,
+        conversation_external_id="main",
+    )[0]
+
+    memory_a = db.get(Memory, result_a.memory_id)
+    memory_b = db.get(Memory, result_b.memory_id)
+    assert memory_a.user_id == user_a.id
+    assert memory_a.conversation_id == conversation_a.id
+    assert memory_b.user_id == user_b.id
+    assert memory_b.conversation_id == conversation_b.id
+
+
+def test_conversation_external_id_belonging_only_to_another_user_is_rejected(db) -> None:
+    owner = _user(db)
+    foreign_user = _user(db)
+    foreign_conversation = Conversation(external_id="main", user_id=foreign_user.id)
+    db.add(foreign_conversation)
+    db.commit()
+
+    with pytest.raises(WriteError, match="No conversation exists"):
+        write_memories(
+            db,
+            [_candidate()],
+            user_external_id=owner.external_id,
+            conversation_external_id="main",
+        )
+
+
+def test_single_user_conversation_write_behavior_is_unchanged(db) -> None:
+    user = _user(db)
+    conversation = _conversation(db, user)
+
+    result = write_memories(
+        db,
+        [_candidate()],
+        user_external_id=user.external_id,
+        conversation_external_id=conversation.external_id,
+    )[0]
+
+    persisted = db.get(Memory, result.memory_id)
+    assert result.action is WriteAction.ADD
+    assert persisted.conversation_id == conversation.id
 
 
 def test_provenance_must_match_the_supplied_conversation(db) -> None:
