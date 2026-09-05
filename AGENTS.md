@@ -18,6 +18,8 @@ Keep the project simple, readable, and modular.
 * Never run destructive operations against the development or production database.
 * Database integration tests MUST use `TEST_DATABASE_URL`.
 * Never silently fall back from `TEST_DATABASE_URL` to `DATABASE_URL`.
+* Evaluation/benchmark workloads under `evals/` MUST use `EVAL_DATABASE_URL` (see `evals/db.py`).
+* Never silently fall back from `EVAL_DATABASE_URL` to `TEST_DATABASE_URL` or `DATABASE_URL`.
 * Do not modify external resources unless explicitly requested.
 
 ## Testing

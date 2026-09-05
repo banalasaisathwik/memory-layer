@@ -1,0 +1,11 @@
+{
+  "sample_id": "conv-30",
+  "dataset_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+  "llm_model": "google/gemini-2.5-flash",
+  "embedding_model": "openai/text-embedding-3-small",
+  "user_id": "locomo-resume-conv-30",
+  "conversation_id": "conversation",
+  "last_completed_session": 19,
+  "updated_at": "2026-09-05T05:52:22.147916+00:00",
+  "git_commit": "672e4d1a040fadcd7b50c691690c5b291ba31bfe"
+}

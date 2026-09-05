@@ -15,7 +15,6 @@ provenance caveat that this milestone deliberately does not fix.
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 import sys
 import time
@@ -24,7 +23,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from dotenv import load_dotenv
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -35,6 +33,7 @@ from src.retrieval import MessageIndexSyncStats, get_message_index_sync_stats, r
 
 from .checkpoint import load_checkpoint, new_checkpoint, save_checkpoint
 from .dataset import DATASET_SOURCE_URL, DEFAULT_DATASET_PATH, dataset_sha256, load_locomo_dataset
+from ..db import EvalDatabaseConfigError, get_eval_database_url, print_eval_database_banner
 from .ingest import IngestOutcome, ingest_sample
 from .metrics import aggregate_retrieval_metrics, evaluate_question_retrieval, group_retrieval_by_category
 from .qa_metrics import aggregate_qa_metrics, group_qa_by_category
@@ -45,17 +44,6 @@ from .scoring import ScoringError, score_qa
 
 class LocomoEnvironmentError(RuntimeError):
     """Raised when required database or provider configuration is missing."""
-
-
-def _test_database_url() -> str:
-    load_dotenv(override=False)
-    value = os.getenv("TEST_DATABASE_URL")
-    if not value:
-        raise LocomoEnvironmentError(
-            "TEST_DATABASE_URL must be set before running the LoCoMo benchmark. "
-            "It never falls back to DATABASE_URL; use a disposable or dedicated test database."
-        )
-    return value
 
 
 def _check_provider_config() -> None:
@@ -444,16 +432,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        test_database_url = _test_database_url()
+        eval_database_url = get_eval_database_url()
         reset_config()
         reset_engine()
         _check_provider_config()
         samples = _select_samples(load_locomo_dataset(args.dataset_path), conversation_index=args.conversation)
-    except LocomoEnvironmentError as error:
+    except (LocomoEnvironmentError, EvalDatabaseConfigError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
-    configure(database_url=test_database_url)
+    print_eval_database_banner(eval_database_url)
+    configure(database_url=eval_database_url)
     create_tables()
     run_id = uuid4().hex[:8]
     reset_message_index_sync_stats()

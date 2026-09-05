@@ -7,16 +7,20 @@ Representation choices (see evals/README.md for the full rationale):
   chat role. Some LoCoMo questions name a speaker directly (e.g. "What hobby
   did Caroline start again?"), so the speaker name must remain part of what
   extraction actually sees.
-- speaker_a -> "user", speaker_b -> "assistant", fixed for the whole sample
-  (LocomoSample.role_for_speaker).
+- Both speaker_a and speaker_b map to "user" (LocomoSample.role_for_speaker).
+  LoCoMo conversations are between two human participants, not a user and an
+  assistant -- mapping speaker_b to "assistant" made the production
+  extractor's assistant-claims-are-not-evidence rule silently discard every
+  fact speaker_b stated about themselves. Speaker names in the text (above)
+  are what let extraction still tell the two participants apart.
 - A turn's released image caption (``blip_caption``), when present, is
   appended to its text as ``"... [shared image: <caption>]"``. Images
   themselves are never downloaded.
 - MemoryLayer.add() has no application-supplied timestamp parameter and this
-  milestone does not redesign that API. Instead, the first turn of every
-  session is prefixed with ``"[Session date: <session_date_time>]"`` so the
-  released session timestamp is not silently discarded; it is not repeated on
-  every turn since every turn within one session shares the same timestamp.
+  milestone does not redesign that API. Instead, every turn is prefixed with
+  ``"[Session date: <session_date_time>]"`` so the released session timestamp
+  is not silently discarded for any turn, not just the first one in its
+  session.
 
 A LoCoMo conversation is long enough (hundreds of turns, many extraction
 calls) that a single interaction's malformed LLM response -- for example, a
@@ -72,14 +76,11 @@ class IngestOutcome:
     messages_persisted: int = 0
 
 
-def _turn_content(turn: LocomoTurn, *, is_first_in_session: bool) -> str:
+def _turn_content(turn: LocomoTurn) -> str:
     text = turn.text
     if turn.image_caption:
         text = f"{text} [shared image: {turn.image_caption}]"
-    content = f"{turn.speaker}: {text}"
-    if is_first_in_session:
-        content = f"[Session date: {turn.session_date_time}]\n{content}"
-    return content
+    return f"[Session date: {turn.session_date_time}] {turn.speaker}: {text}"
 
 
 def _group_by_session(turns: list[LocomoTurn]) -> dict[int, list[LocomoTurn]]:
@@ -229,9 +230,9 @@ def ingest_sample(
         messages = [
             {
                 "role": sample.role_for_speaker(turn.speaker),
-                "content": _turn_content(turn, is_first_in_session=(index == 0)),
+                "content": _turn_content(turn),
             }
-            for index, turn in enumerate(turns)
+            for turn in turns
         ]
         try:
             result = memory.add(user_id=user_id, conversation_id=conversation_id, messages=messages)

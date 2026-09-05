@@ -64,14 +64,23 @@ class LocomoSample(BaseModel):
     turns: list[LocomoTurn]
     qa: list[LocomoQA]
 
-    def role_for_speaker(self, speaker: str) -> Literal["user", "assistant"]:
-        """speaker_a -> user, speaker_b -> assistant; fixed for the whole sample."""
+    def role_for_speaker(self, speaker: str) -> Literal["user"]:
+        """Both LoCoMo speakers are human participants, so both map to "user".
 
-        if speaker == self.speaker_a:
-            return "user"
-        if speaker == self.speaker_b:
-            return "assistant"
-        raise ValueError(f"{self.sample_id}: unknown speaker {speaker!r} (expected {self.speaker_a!r}/{self.speaker_b!r}).")
+        LoCoMo conversations are between two people, not a user and an
+        assistant. Mapping speaker_b to "assistant" would make the
+        production extractor's assistant-claims-are-not-evidence rule (see
+        src/memory/prompts.py) silently discard every fact speaker_b states
+        about themselves, which is a LoCoMo adapter bug, not a reason to
+        weaken that production safety rule. Both speakers' statements must
+        be eligible memory evidence; their names are preserved in the
+        message text itself (see ingest.py) so extraction can still tell
+        them apart.
+        """
+
+        if speaker not in (self.speaker_a, self.speaker_b):
+            raise ValueError(f"{self.sample_id}: unknown speaker {speaker!r} (expected {self.speaker_a!r}/{self.speaker_b!r}).")
+        return "user"
 
 
 class QuestionRetrievalMetrics(BaseModel):

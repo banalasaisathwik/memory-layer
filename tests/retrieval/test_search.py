@@ -259,6 +259,31 @@ def test_postgresql_lexical_search_handles_technical_terms_identifiers_and_user_
     assert [hit.memory_id for hit in foreign_hits] == [str(foreign.id)]
 
 
+def test_bm25_is_the_default_lexical_backend_and_finds_partial_matches(db, fake_embeddings) -> None:
+    """Problem B regression: a natural-language question with no exact
+    full-text match must still surface the relevant memory by default."""
+
+    user = _user(db)
+    preferred = _memory(db, user, "Gina opened an online clothing store.")
+    _memory(db, user, "Jon changed jobs.")
+
+    hits = search_memories(db, "What clothing business does Gina run?", user_external_id=user.external_id)
+
+    assert any(hit.memory_id == str(preferred.id) and hit.lexical_rank == 1 for hit in hits)
+
+
+def test_search_memories_lexical_backend_selects_bm25_or_postgres_fts(db, fake_embeddings) -> None:
+    user = _user(db)
+    preferred = _memory(db, user, "Gina opened an online clothing store.")
+    query = "What clothing business does Gina run?"
+
+    bm25_hits = search_memories(db, query, user_external_id=user.external_id, lexical_backend="bm25")
+    fts_hits = search_memories(db, query, user_external_id=user.external_id, lexical_backend="postgres_fts")
+
+    assert any(hit.memory_id == str(preferred.id) and hit.lexical_rank == 1 for hit in bm25_hits)
+    assert all(hit.lexical_rank is None for hit in fts_hits)
+
+
 def test_sync_persists_normalized_embeddings_per_user_and_skips_noop_reembedding(db, fake_embeddings) -> None:
     first_user = _user(db)
     second_user = _user(db)

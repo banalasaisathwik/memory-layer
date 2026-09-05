@@ -18,13 +18,11 @@ back.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 
 from src.config import configure, get_config, reset_config
@@ -33,6 +31,7 @@ from src.memory import build_extraction_context, extract_memories, write_memorie
 from src.retrieval import search_memories
 
 from .datasets import DATASETS
+from .db import EvalDatabaseConfigError, get_eval_database_url, print_eval_database_banner
 from .metrics import aggregate_case_results, evaluate_retrieval, group_by_category
 from .report import render_table, save_report
 from .schemas import CaseResult, EvalCase, EvalMessage, RetrievedMemory, RunReport
@@ -40,19 +39,6 @@ from .schemas import CaseResult, EvalCase, EvalMessage, RetrievedMemory, RunRepo
 
 class EvalEnvironmentError(RuntimeError):
     """Raised when required database or provider configuration is missing."""
-
-
-def _test_database_url() -> str:
-    """Require a dedicated test database, matching the repository's test convention."""
-
-    load_dotenv(override=False)
-    value = os.getenv("TEST_DATABASE_URL")
-    if not value:
-        raise EvalEnvironmentError(
-            "TEST_DATABASE_URL must be set before running the eval harness. "
-            "The harness never falls back to DATABASE_URL; use a disposable or dedicated test database."
-        )
-    return value
 
 
 def _check_provider_config() -> None:
@@ -216,15 +202,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        test_database_url = _test_database_url()
+        eval_database_url = get_eval_database_url()
         reset_config()
         reset_engine()
         _check_provider_config()
-    except EvalEnvironmentError as error:
+    except (EvalEnvironmentError, EvalDatabaseConfigError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
-    configure(database_url=test_database_url)
+    print_eval_database_banner(eval_database_url)
+    configure(database_url=eval_database_url)
     create_tables()
     try:
         results = run_dataset(DATASETS[args.dataset], top_k=args.top_k)

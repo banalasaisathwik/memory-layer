@@ -11,7 +11,9 @@ from .errors import (
     RetrievalError,
     UserNotFoundError,
 )
-from .fusion import FusedMemory, RRF_K, reciprocal_rank_fusion
+from .bm25 import BM25_B, BM25_K1, BM25Hit, bm25_rank, tokenize
+from .fusion import FusedMemory, FusedMessage, RRF_K, fuse_message_rankings, reciprocal_rank_fusion
+from .lexical import bm25_retrieve, lexical_retrieve
 from .schemas import SearchFilters, SearchHit
 from .search import search_memories
 from .message_vector import (
@@ -25,34 +27,49 @@ from .message_vector import (
     sync_conversation_message_index,
 )
 from .vector import (
+    MemoryIndexSyncStats,
+    get_memory_index_sync_stats,
     load_user_memory_index,
     rebuild_user_memory_index,
+    reset_memory_index_sync_stats,
     sync_user_memory_index,
     user_index_paths,
 )
 
 __all__ = [
+    "BM25_B",
+    "BM25_K1",
+    "BM25Hit",
     "EmbeddingError",
     "conversation_message_index_paths",
     "FusedMemory",
+    "FusedMessage",
     "IndexDimensionMismatchError",
     "IndexModelMismatchError",
     "IndexStateError",
     "InvalidEmbeddingError",
     "InvalidFilterScopeError",
     "InvalidSearchError",
+    "MemoryIndexSyncStats",
     "MessageIndexSyncStats",
     "RRF_K",
     "RetrievalError",
     "SearchFilters",
     "SearchHit",
     "UserNotFoundError",
+    "bm25_rank",
+    "bm25_retrieve",
+    "fuse_message_rankings",
+    "get_memory_index_sync_stats",
     "get_message_index_sync_stats",
+    "lexical_retrieve",
+    "tokenize",
     "load_user_memory_index",
     "load_conversation_message_index",
     "rebuild_conversation_message_index",
     "rebuild_user_memory_index",
     "reciprocal_rank_fusion",
+    "reset_memory_index_sync_stats",
     "reset_message_index_sync_stats",
     "search_memories",
     "retrieve_semantic_message_context",

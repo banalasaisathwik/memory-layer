@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum as SqlEnum, Float, ForeignKey, Index, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Enum as SqlEnum, Float, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
@@ -163,6 +163,6 @@ class Memory(Base):
 # Keeping it in metadata makes create_tables() match the Alembic schema.
 Index(
     "ix_memories_memory_text_fts",
-    func.to_tsvector("simple", Memory.memory_text),
+    text("to_tsvector('simple', memory_text)"),
     postgresql_using="gin",
 )

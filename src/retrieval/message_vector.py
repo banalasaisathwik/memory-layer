@@ -611,11 +611,18 @@ def retrieve_semantic_message_context(
     limit: int = 3,
     exclude_message_ids: set[str] | None = None,
     before_message_id: str | None = None,
+    chronological: bool = True,
 ) -> list[Message]:
-    """Return ranked semantic candidates as chronological, DB-validated Messages.
+    """Return ranked semantic candidates as DB-validated Messages.
 
     This function searches only one owned conversation.  FAISS positions remain
     private derived state; returned rows always come from PostgreSQL.
+
+    By default the result is sorted chronologically for direct callers.  Pass
+    ``chronological=False`` to keep FAISS similarity-rank order instead (best
+    match first) -- extraction-context fusion needs the rank order, since
+    fusing an already chronologically-sorted branch would discard its
+    relevance signal.
     """
 
     if not query_text.strip():
@@ -677,5 +684,6 @@ def retrieve_semantic_message_context(
         and message_id not in excluded
         and _precedes(message, marker)
     ][:limit]
-    selected.sort(key=lambda message: (message.created_at, str(message.id)))
+    if chronological:
+        selected.sort(key=lambda message: (message.created_at, str(message.id)))
     return selected

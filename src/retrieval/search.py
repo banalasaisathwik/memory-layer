@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,7 +11,7 @@ from src.database.models import Conversation, User
 
 from .errors import InvalidFilterScopeError, InvalidSearchError, UserNotFoundError
 from .fusion import reciprocal_rank_fusion
-from .lexical import lexical_retrieve
+from .lexical import bm25_retrieve, lexical_retrieve
 from .schemas import SearchFilters, SearchHit
 from .structured import structured_retrieve
 from .vector import vector_retrieve
@@ -17,6 +19,8 @@ from .vector import vector_retrieve
 
 _MAX_SEARCH_LIMIT = 100
 _BRANCH_CANDIDATE_MULTIPLIER = 5
+
+LexicalBackend = Literal["bm25", "postgres_fts"]
 
 
 def _resolve_user(db: Session, user_external_id: str) -> User:
@@ -56,8 +60,15 @@ def search_memories(
     user_external_id: str,
     limit: int = 10,
     filters: SearchFilters | None = None,
+    lexical_backend: LexicalBackend = "bm25",
 ) -> list[SearchHit]:
-    """Search one user's active memories with structured, FTS, and FAISS branches.
+    """Search one user's active memories with structured, lexical, and FAISS branches.
+
+    ``lexical_backend`` selects the lexical branch: ``"bm25"`` (the default
+    production behavior, genuine Okapi BM25 scoring) or ``"postgres_fts"``
+    (the original ``websearch_to_tsquery``/``ts_rank_cd`` branch, retained
+    for side-by-side ablation against BM25). Either way, the branch is fused
+    with the structured and vector branches by the same equal-weight RRF.
 
     A missing, stale, or corrupt local FAISS index is rebuilt from PostgreSQL
     during the vector branch. That rebuild may call the configured embedding
@@ -80,7 +91,8 @@ def search_memories(
         conversation=conversation,
         limit=branch_limit,
     )
-    lexical = lexical_retrieve(
+    lexical_retrieve_fn = bm25_retrieve if lexical_backend == "bm25" else lexical_retrieve
+    lexical = lexical_retrieve_fn(
         db,
         query,
         user=user,

@@ -257,6 +257,51 @@ def test_lexical_matches_are_ranked_then_presented_chronologically(db) -> None:
     ]
 
 
+def test_bm25_lexical_context_does_not_require_every_query_term(db) -> None:
+    """Regression for Problem B: the old ``plainto_tsquery`` explicit-query
+    path treated every word as required (AND semantics), so a natural,
+    multi-word query would find nothing unless the message happened to
+    contain every word. BM25 must still find a message sharing only one
+    term."""
+
+    conversation = _conversation(db)
+    relevant = _message(db, conversation, number=1, content="The Atlas deployment finally succeeded.")
+    _message(db, conversation, number=2, content="unrelated recent message")
+    target = _message(db, conversation, number=3, content="Please check on it.")
+
+    context = build_extraction_context(
+        db,
+        user_external_id=conversation.user.external_id,
+        conversation_external_id=conversation.external_id,
+        target_message_ids=[str(target.id)],
+        recent_message_limit=1,
+        older_lexical_query="Atlas rollout status update",
+        older_lexical_limit=1,
+    )
+
+    assert [message.content for message in context.older_lexical_messages] == [relevant.content]
+
+
+def test_bm25_lexical_context_never_reads_another_conversation(db) -> None:
+    conversation = _conversation(db)
+    foreign = _conversation(db)
+    _message(db, foreign, number=1, content="Atlas belongs to a foreign conversation.")
+    _message(db, conversation, number=2, content="unrelated recent message")
+    target = _message(db, conversation, number=3, content="Atlas status?")
+
+    context = build_extraction_context(
+        db,
+        user_external_id=conversation.user.external_id,
+        conversation_external_id=conversation.external_id,
+        target_message_ids=[str(target.id)],
+        recent_message_limit=1,
+        older_lexical_query="Atlas",
+        older_lexical_limit=5,
+    )
+
+    assert context.older_lexical_messages == []
+
+
 def test_context_is_scoped_to_the_requested_user_when_conversation_ids_match(db) -> None:
     shared_conversation_id = f"shared-context-{uuid4().hex}"
     selected = _conversation(

@@ -9,3 +9,4 @@ build/
 *.egg-info/
 evals/results/*.json
 evals/checkpoints/*.json
+evals/cache/

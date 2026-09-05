@@ -9,10 +9,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from src.config import get_config
 from src.database.models import Conversation, ConversationSummary, Message, User
-from src.retrieval import RetrievalError, retrieve_semantic_message_context
+from src.retrieval import (
+    RetrievalError,
+    bm25_rank,
+    fuse_message_rankings,
+    retrieve_semantic_message_context,
+)
 
 
 class ContextError(Exception):
@@ -198,26 +204,117 @@ def _target_semantic_query(targets: list[Message]) -> str:
     return "\n".join(user_text or [target.content for target in targets])
 
 
-def _merge_older_messages(
-    lexical_messages: list[Message],
-    semantic_messages: list[Message],
+def _select_older_messages(
+    lexical_messages_by_rank: list[Message],
+    semantic_messages_by_rank: list[Message],
     *,
     limit: int,
 ) -> list[Message]:
-    """Keep a bounded, deterministic UUID union readable in chronological order."""
+    """Fuse relevance-ranked branches with RRF, cap, then order for readability.
 
-    selected: list[Message] = []
-    seen: set[str] = set()
-    for message in [*lexical_messages, *semantic_messages]:
-        message_id = str(message.id)
-        if message_id in seen:
-            continue
-        seen.add(message_id)
-        selected.append(message)
-        if len(selected) == limit:
-            break
+    Both arguments must be in each branch's own relevance-rank order (best
+    match first) so ``fuse_message_rankings`` can score them; the
+    chronological order used for the extraction prompt is applied only after
+    the top-K selection below, never before it.
+    """
+
+    fused = fuse_message_rankings(lexical=lexical_messages_by_rank, semantic=semantic_messages_by_rank)
+    selected = [item.message for item in fused[:limit]]
     selected.sort(key=lambda message: (message.created_at, str(message.id)))
     return selected
+
+
+def _eligible_older_messages(
+    db: Session,
+    *,
+    conversation: Conversation,
+    before_target: ColumnElement[bool],
+    excluded_ids: list[object],
+) -> list[Message]:
+    """Fetch every same-conversation message BM25 is allowed to score.
+
+    Scoped to this conversation and strictly before the target interaction,
+    excluding the target and recent-window rows -- the same temporal/context
+    boundary the old FTS query enforced. Deliberately has no text filter of
+    its own: BM25 must generate its own lexical ranking rather than reranking
+    an already AND-filtered candidate set.
+    """
+
+    return list(
+        db.scalars(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation.id,
+                before_target,
+                ~Message.id.in_(excluded_ids),
+            )
+            .order_by(Message.created_at.asc(), Message.id.asc())
+        )
+    )
+
+
+def _bm25_older_messages(
+    db: Session,
+    *,
+    conversation: Conversation,
+    before_target: ColumnElement[bool],
+    excluded_ids: list[object],
+    query_text: str,
+    limit: int,
+) -> list[Message]:
+    """Rank eligible older messages with genuine BM25; this is the default lexical branch."""
+
+    candidates = _eligible_older_messages(
+        db, conversation=conversation, before_target=before_target, excluded_ids=excluded_ids
+    )
+    hits = bm25_rank(query_text, candidates, text_of=lambda message: message.content)
+    return [hit.item for hit in hits[:limit]]
+
+
+def _postgres_fts_older_messages(
+    db: Session,
+    *,
+    conversation: Conversation,
+    before_target: ColumnElement[bool],
+    excluded_ids: list[object],
+    query_text: str,
+    explicit_query: bool,
+    limit: int,
+) -> list[Message]:
+    """The original ``to_tsquery``/``ts_rank_cd`` branch, retained for FTS-vs-BM25 ablation.
+
+    ``explicit_query`` matches the old behavior: a caller-supplied
+    ``older_lexical_query`` is parsed with ``plainto_tsquery`` (natural
+    language), while the default target-derived, already ``|``-joined query
+    uses ``to_tsquery`` (raw operator syntax). Not used by
+    ``build_extraction_context`` by default; kept importable so the lexical
+    ablation comparison can run both backends over the same fixtures without
+    duplicating the query-scoping logic.
+    """
+
+    lexical_query = (
+        func.plainto_tsquery("simple", query_text)
+        if explicit_query
+        else func.to_tsquery("simple", query_text)
+    )
+    lexical_vector = func.to_tsvector("simple", Message.content)
+    return list(
+        db.scalars(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation.id,
+                before_target,
+                ~Message.id.in_(excluded_ids),
+                lexical_vector.op("@@")(lexical_query),
+            )
+            .order_by(
+                func.ts_rank_cd(lexical_vector, lexical_query).desc(),
+                Message.created_at.desc(),
+                Message.id.desc(),
+            )
+            .limit(limit)
+        )
+    )
 
 
 def build_extraction_context(
@@ -301,47 +398,42 @@ def build_extraction_context(
         )
     )
     recent_messages.reverse()
-    older_lexical_messages: list[Message] = []
+    lexical_messages_by_rank: list[Message] = []
     lexical_query_text = (
         older_lexical_query if older_lexical_query is not None else _target_lexical_query(targets)
     )
     if lexical_query_text.strip():
-        lexical_query = (
-            func.plainto_tsquery("simple", lexical_query_text)
-            if older_lexical_query is not None
-            else func.to_tsquery("simple", lexical_query_text)
-        )
-        lexical_vector = func.to_tsvector("simple", Message.content)
         excluded_ids = [
             *(message.id for message in targets),
             *(message.id for message in recent_messages),
         ]
-        older_lexical_messages = list(
-            db.scalars(
-                select(Message)
-                .where(
-                    Message.conversation_id == conversation.id,
-                    before_target,
-                    ~Message.id.in_(excluded_ids),
-                    lexical_vector.op("@@")(lexical_query),
-                )
-                .order_by(
-                    func.ts_rank_cd(lexical_vector, lexical_query).desc(),
-                    Message.created_at.desc(),
-                    Message.id.desc(),
-                )
-                .limit(lexical_limit)
-            )
+        # Kept in relevance-rank order (best match first) for RRF fusion below.
+        # older_lexical_messages, the inspectable/prompt debug field, gets its
+        # own chronologically-sorted copy further down. BM25 scores every
+        # eligible older message itself; it is never a rerank of an
+        # already-AND-filtered FTS candidate set.
+        lexical_messages_by_rank = _bm25_older_messages(
+            db,
+            conversation=conversation,
+            before_target=before_target,
+            excluded_ids=excluded_ids,
+            query_text=lexical_query_text,
+            limit=lexical_limit,
         )
-        older_lexical_messages.sort(key=lambda message: (message.created_at, str(message.id)))
+    older_lexical_messages = sorted(
+        lexical_messages_by_rank, key=lambda message: (message.created_at, str(message.id))
+    )
 
     # Semantic message context is an optional enhancement.  It remains scoped
     # to this conversation, excludes target/recent rows, and can fail without
     # making the safe summary/lexical/recent context unavailable.
-    older_semantic_messages: list[Message] = []
+    semantic_messages_by_rank: list[Message] = []
     semantic_retrieval_error: str | None = None
     try:
-        older_semantic_messages = retrieve_semantic_message_context(
+        # chronological=False keeps FAISS similarity-rank order (best match
+        # first) for RRF fusion below; older_semantic_messages, the
+        # inspectable/prompt debug field, gets its own chronological copy.
+        semantic_messages_by_rank = retrieve_semantic_message_context(
             db,
             user_external_id=user_external_id,
             conversation_external_id=conversation_external_id,
@@ -352,16 +444,20 @@ def build_extraction_context(
                 *(str(message.id) for message in recent_messages),
             },
             before_message_id=str(first_target.id),
+            chronological=False,
         )
     except RetrievalError as error:
         # RetrievalError messages intentionally contain only safe categories,
         # so callers can observe graceful degradation without leaking provider
         # responses, credentials, or filesystem details.
         semantic_retrieval_error = str(error)
+    older_semantic_messages = sorted(
+        semantic_messages_by_rank, key=lambda message: (message.created_at, str(message.id))
+    )
 
-    older_relevant_messages = _merge_older_messages(
-        older_lexical_messages,
-        older_semantic_messages,
+    older_relevant_messages = _select_older_messages(
+        lexical_messages_by_rank,
+        semantic_messages_by_rank,
         limit=old_context_limit,
     )
     persisted_summary = db.scalar(

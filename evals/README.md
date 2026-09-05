@@ -80,15 +80,16 @@ Both are summed (not averaged) in the aggregate report; either one should read 0
 ## Running it
 
 ```powershell
-$env:TEST_DATABASE_URL = "postgresql+psycopg://user:password@host/database"
+$env:EVAL_DATABASE_URL = "postgresql+psycopg://user:password@host/database"
 python -m evals.runner --dataset smoke --top-k 5
 ```
 
 This calls the real, independently configured LLM and embedding providers (the
 same `LLM_*` / `EMBEDDING_*` variables described in the project README), so it is
 a deliberate, credentialed run rather than part of the normal test suite. It
-always uses `TEST_DATABASE_URL`, matching the rest of the project's database
-integration tests, and never falls back to `DATABASE_URL`. If `TEST_DATABASE_URL`,
+always uses `EVAL_DATABASE_URL` (see `evals/db.py`), a dedicated eval database kept
+separate from both `DATABASE_URL` (application/Neon) and `TEST_DATABASE_URL`
+(integration tests), and never falls back to either. If `EVAL_DATABASE_URL`,
 `LLM_MODEL`, `LLM_API_KEY`, or `EMBEDDING_API_KEY` is missing, the command exits
 with a clear message naming exactly what to configure instead of running.
 
@@ -306,7 +307,7 @@ database connection) without starting over.
 ## 9. Running it
 
 ```powershell
-$env:TEST_DATABASE_URL = "postgresql+psycopg://user:password@host/database"
+$env:EVAL_DATABASE_URL = "postgresql+psycopg://user:password@host/database"
 
 # Cheap development subset: one conversation, first 20 questions, retrieval only.
 python -m evals.locomo --conversation 0 --max-questions 20 --mode retrieval
@@ -322,8 +323,8 @@ python -m evals.locomo --conversation 1 --mode retrieval --resume
 ```
 
 Same provider-configuration requirements as `evals.runner` above
-(`TEST_DATABASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, `EMBEDDING_API_KEY`), never
-falling back to `DATABASE_URL`. `--top-k` defaults to 10 (the largest K this
+(`EVAL_DATABASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, `EMBEDDING_API_KEY`), never
+falling back to `TEST_DATABASE_URL` or `DATABASE_URL`. `--top-k` defaults to 10 (the largest K this
 milestone reports). Output is a per-run JSON report under `evals/results/`
 (gitignored, same as `smoke`'s reports) plus a printed summary table.
 
@@ -341,7 +342,14 @@ cap is reached. Use `--conversation` to actually bound ingestion cost.
 LLM/embedding clients. Dataset parsing, scoring, and metrics tests need
 neither a database nor a provider and always run; ingestion/runner
 integration tests are gated behind `TEST_DATABASE_URL` like the rest of the
-project's database tests and are skipped without it. No test downloads the
+project's database tests and are skipped without it. This is intentional and
+distinct from `EVAL_DATABASE_URL`: these tests exercise the harness's
+functions directly against a disposable database via `configure()`, the same
+way every other integration test in `tests/` does, so the regular test suite
+never needs the Docker eval Postgres instance. Only `EVAL_DATABASE_URL`
+resolution itself (`evals/db.py`, `tests/evals/test_eval_db.py`) and the CLI
+entry points (`evals.runner`, `evals.locomo`, `ablate_lexical`, `recover`,
+`diagnose`, `rerun`) use `EVAL_DATABASE_URL`. No test downloads the
 dataset or calls a live provider.
 
 ## 11. Incremental per-conversation Message FAISS sync
@@ -452,12 +460,14 @@ memories. That is exactly why checkpoint/resume (section 12) exists as a
 harness-level safety net instead: `--resume` only ever continues from a
 session boundary it can prove is safe, never by retrying an in-flight call.
 
-For a genuinely long benchmark run, prefer Neon's **pooled** connection
-endpoint (its hostname contains `-pooler`) for `TEST_DATABASE_URL` if your
-Neon project has one -- it tolerates many short-lived connections better
-than the direct endpoint. This project does not hard-code or rewrite any
-Neon-specific URL; it only reuses whatever `TEST_DATABASE_URL` /
-`DATABASE_URL` you configure.
+For a genuinely long benchmark run against a remote database, prefer Neon's
+**pooled** connection endpoint (its hostname contains `-pooler`) for
+`EVAL_DATABASE_URL` if your Neon project has one -- it tolerates many
+short-lived connections better than the direct endpoint. This project does
+not hard-code or rewrite any Neon-specific URL; it only reuses whatever
+`EVAL_DATABASE_URL` you configure. During normal development, `EVAL_DATABASE_URL`
+should instead point at a local, dedicated PostgreSQL instance (see
+`.env.example`), keeping benchmark workloads off Neon entirely.
 
 ## 14. LoCoMo Subset Baseline V0
 

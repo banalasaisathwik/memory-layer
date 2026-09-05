@@ -39,10 +39,10 @@ def test_session_timestamps_are_preserved_per_turn() -> None:
     assert all(turn.session_date_time == "3:00 pm on 5 January, 2024" for turn in session_2_turns)
 
 
-def test_speaker_role_mapping_is_fixed_per_sample() -> None:
+def test_both_speakers_map_to_user_role() -> None:
     sample = _load()
     assert sample.role_for_speaker("Alice") == "user"
-    assert sample.role_for_speaker("Bob") == "assistant"
+    assert sample.role_for_speaker("Bob") == "user"
 
 
 def test_category_mapping_matches_official_locomo_ids() -> None:
