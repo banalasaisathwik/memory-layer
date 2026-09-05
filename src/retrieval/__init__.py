@@ -15,9 +15,12 @@ from .fusion import FusedMemory, RRF_K, reciprocal_rank_fusion
 from .schemas import SearchFilters, SearchHit
 from .search import search_memories
 from .message_vector import (
+    MessageIndexSyncStats,
     conversation_message_index_paths,
+    get_message_index_sync_stats,
     load_conversation_message_index,
     rebuild_conversation_message_index,
+    reset_message_index_sync_stats,
     retrieve_semantic_message_context,
     sync_conversation_message_index,
 )
@@ -38,16 +41,19 @@ __all__ = [
     "InvalidEmbeddingError",
     "InvalidFilterScopeError",
     "InvalidSearchError",
+    "MessageIndexSyncStats",
     "RRF_K",
     "RetrievalError",
     "SearchFilters",
     "SearchHit",
     "UserNotFoundError",
+    "get_message_index_sync_stats",
     "load_user_memory_index",
     "load_conversation_message_index",
     "rebuild_conversation_message_index",
     "rebuild_user_memory_index",
     "reciprocal_rank_fusion",
+    "reset_message_index_sync_stats",
     "search_memories",
     "retrieve_semantic_message_context",
     "sync_conversation_message_index",

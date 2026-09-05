@@ -53,6 +53,36 @@ class ConversationMessageVectorIndex:
     dimension: int
 
 
+@dataclass
+class MessageIndexSyncStats:
+    """Simple hot-path counters proving append growth no longer forces a full rebuild.
+
+    Diagnostics only -- nothing here changes retrieval behavior. A benchmark
+    runner can read these before/after a long ingestion run to see how many
+    times each path actually executed.
+    """
+
+    full_rebuilds: int = 0
+    incremental_appends: int = 0
+    unchanged_hits: int = 0
+
+
+_sync_stats = MessageIndexSyncStats()
+
+
+def get_message_index_sync_stats() -> MessageIndexSyncStats:
+    """Return the process-wide counters accumulated so far."""
+
+    return _sync_stats
+
+
+def reset_message_index_sync_stats() -> None:
+    """Zero the counters; useful at the start of a benchmark run or a test."""
+
+    global _sync_stats
+    _sync_stats = MessageIndexSyncStats()
+
+
 def _user_fingerprint(user_external_id: str) -> str:
     return safe_fingerprint(user_external_id)
 
@@ -118,6 +148,28 @@ def _conversation_messages(db: Session, *, conversation: Conversation) -> list[M
             .order_by(Message.created_at.asc(), Message.id.asc())
         )
     )
+
+
+def _conversation_message_ids(db: Session, *, conversation: Conversation) -> list[str]:
+    """Cheap ordered id-only fetch used to detect append-only growth.
+
+    Deliberately avoids selecting ``content``/``embedding`` columns: this is
+    the check run on every retrieval call, so it must stay far cheaper than
+    fetching every message's full text and vector across the network.
+    """
+
+    return [
+        str(message_id)
+        for message_id in db.scalars(
+            select(Message.id)
+            .where(
+                Message.conversation_id == conversation.id,
+                Message.role.in_(_CONVERSATIONAL_ROLES),
+                func.btrim(Message.content) != "",
+            )
+            .order_by(Message.created_at.asc(), Message.id.asc())
+        )
+    ]
 
 
 def _embedding_response_vectors(texts: list[str]) -> list[np.ndarray]:
@@ -270,13 +322,16 @@ def load_conversation_message_index(
     )
 
 
-def _synchronize_embeddings(db: Session, *, conversation: Conversation) -> bool:
-    """Persist only embeddings that cannot safely serve the configured model."""
+def _persist_required_embeddings(db: Session, missing: list[Message], *, model: str) -> None:
+    """Embed and durably persist exactly the given rows; the only embedding writer.
 
-    messages = _conversation_messages(db, conversation=conversation)
-    missing = _embedding_rows_requiring_sync(messages, model=get_config().embedding_model)
+    Shared by the full-conversation sync path and the incremental-append path
+    so there is exactly one place that turns Message content into a
+    persisted, model-tagged embedding column.
+    """
+
     if not missing:
-        return False
+        return
     vectors = _embedding_response_vectors([message.content for message in missing])
     expected_dimension: int | None = None
     for message, vector in zip(missing, vectors, strict=True):
@@ -285,12 +340,23 @@ def _synchronize_embeddings(db: Session, *, conversation: Conversation) -> bool:
         elif vector.size != expected_dimension:
             raise InvalidEmbeddingError("The embedding provider returned inconsistent vector dimensions.")
         message.embedding = vector.astype(float).tolist()
-        message.embedding_model = get_config().embedding_model
+        message.embedding_model = model
     try:
         db.commit()
     except Exception:
         db.rollback()
         raise
+
+
+def _synchronize_embeddings(db: Session, *, conversation: Conversation) -> bool:
+    """Persist only embeddings that cannot safely serve the configured model."""
+
+    messages = _conversation_messages(db, conversation=conversation)
+    model = get_config().embedding_model
+    missing = _embedding_rows_requiring_sync(messages, model=model)
+    if not missing:
+        return False
+    _persist_required_embeddings(db, missing, model=model)
     return True
 
 
@@ -306,7 +372,7 @@ def _build_and_persist_conversation_message_index(
     matrix = _validated_message_matrix(messages, model=get_config().embedding_model)
     index = faiss.IndexFlatIP(matrix.shape[1])
     index.add(matrix)
-    return _persist_conversation_message_index(
+    path = _persist_conversation_message_index(
         user_external_id=user.external_id,
         conversation_external_id=conversation.external_id,
         index=index,
@@ -314,6 +380,8 @@ def _build_and_persist_conversation_message_index(
         embedding_model=get_config().embedding_model,
         dimension=matrix.shape[1],
     )
+    _sync_stats.full_rebuilds += 1
+    return path
 
 
 def sync_conversation_message_index(
@@ -378,14 +446,128 @@ def _index_matches_database(
     return loaded
 
 
+def _fast_index_match(
+    db: Session,
+    *,
+    user: User,
+    conversation: Conversation,
+) -> ConversationMessageVectorIndex | None:
+    """Cheap steady-state check: only compares ordered message IDs.
+
+    This is the path a call pays for when nothing changed since the last
+    sync -- one id-only query plus a local FAISS/metadata file read, with no
+    content or embedding payload transfer and no re-embedding. It returns
+    None (never raises) for anything that needs the slower, authoritative
+    checks: a missing/corrupt index, a model mismatch, or any ID divergence.
+    """
+
+    try:
+        loaded = load_conversation_message_index(
+            user_external_id=user.external_id,
+            conversation_external_id=conversation.external_id,
+        )
+    except IndexStateError:
+        return None
+    if loaded.message_ids != _conversation_message_ids(db, conversation=conversation):
+        return None
+    _sync_stats.unchanged_hits += 1
+    return loaded
+
+
+def _try_incremental_append(
+    db: Session,
+    *,
+    user: User,
+    conversation: Conversation,
+) -> ConversationMessageVectorIndex | None:
+    """Append only newly persisted messages onto a still-valid index.
+
+    Safe only when the persisted index's message IDs are an exact, ordered
+    prefix of the database's current message IDs -- i.e. pure append growth
+    with no deletion, reordering, or model/dimension change. Returns None
+    (making no changes) for anything else, so the caller falls back to the
+    full, authoritative validate-or-rebuild path. Existing messages are never
+    re-embedded or re-added; only the new suffix is embedded (if not already
+    durably embedded) and added to the loaded FAISS index.
+    """
+
+    model = get_config().embedding_model
+    try:
+        loaded = load_conversation_message_index(
+            user_external_id=user.external_id,
+            conversation_external_id=conversation.external_id,
+            embedding_model=model,
+        )
+    except IndexStateError:
+        return None
+
+    old_ids = loaded.message_ids
+    current_ids = _conversation_message_ids(db, conversation=conversation)
+    if len(current_ids) <= len(old_ids) or current_ids[: len(old_ids)] != old_ids:
+        return None
+
+    new_ids = current_ids[len(old_ids) :]
+    new_messages = list(
+        db.scalars(
+            select(Message)
+            .where(Message.id.in_(new_ids))
+            .order_by(Message.created_at.asc(), Message.id.asc())
+        )
+    )
+    if [str(message.id) for message in new_messages] != new_ids:
+        # A concurrent delete or an ordering surprise; do not guess.
+        return None
+
+    missing = _embedding_rows_requiring_sync(new_messages, model=model)
+    _persist_required_embeddings(db, missing, model=model)
+
+    try:
+        new_matrix = _validated_message_matrix(new_messages, model=model)
+    except (IndexStateError, InvalidEmbeddingError):
+        return None
+    if new_matrix.shape[1] != loaded.dimension:
+        return None
+
+    loaded.index.add(new_matrix)
+    updated_ids = old_ids + new_ids
+    _persist_conversation_message_index(
+        user_external_id=user.external_id,
+        conversation_external_id=conversation.external_id,
+        index=loaded.index,
+        message_ids=updated_ids,
+        embedding_model=model,
+        dimension=loaded.dimension,
+    )
+    _sync_stats.incremental_appends += 1
+    return ConversationMessageVectorIndex(
+        index=loaded.index,
+        message_ids=updated_ids,
+        embedding_model=model,
+        dimension=loaded.dimension,
+    )
+
+
 def _ensure_conversation_message_index(
     db: Session,
     *,
     user: User,
     conversation: Conversation,
 ) -> ConversationMessageVectorIndex | None:
-    """Safely recover missing, stale, corrupt, or mismatched Message FAISS state."""
+    """Safely recover missing, stale, corrupt, or mismatched Message FAISS state.
 
+    Tries three paths, cheapest and most common first: an unchanged index
+    (id comparison only), an append-only incremental update (embed and add
+    only the new suffix), then the full, authoritative validate-or-rebuild
+    path that already existed. The third path's correctness is unchanged;
+    the first two only short-circuit it when they can prove it is safe to.
+    """
+
+    fast = _fast_index_match(db, user=user, conversation=conversation)
+    if fast is not None:
+        return fast
+    appended = _try_incremental_append(db, user=user, conversation=conversation)
+    if appended is not None:
+        return appended
     loaded = _index_matches_database(db, user=user, conversation=conversation)
     if loaded is not None:
         return loaded
