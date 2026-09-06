@@ -10,6 +10,8 @@ jobs:
   build:
     name: Build release candidate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -42,3 +44,85 @@ jobs:
             dist/*.tar.gz
           if-no-files-found: error
           retention-days: 7
+
+  publish-testpypi:
+    name: Publish release candidate to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: meminfra-dist
+          path: dist
+      - name: Confirm release artifacts
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -type f -name 'meminfra-0.1.0-py3-none-any.whl' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -type f -name 'meminfra-0.1.0.tar.gz' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+          find dist -maxdepth 1 -type f -printf '%f\n' | sort
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist/
+
+  verify-testpypi:
+    name: Verify TestPyPI release candidate
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: meminfra
+          POSTGRES_PASSWORD: meminfra_test
+          POSTGRES_DB: meminfra_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U meminfra -d meminfra_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Create clean environment
+        run: python -m venv "$RUNNER_TEMP/meminfra-testpypi"
+      - name: Download meminfra only from TestPyPI
+        run: |
+          "$RUNNER_TEMP/meminfra-testpypi/bin/python" -m pip download \
+            --no-deps \
+            --only-binary=:all: \
+            --no-cache-dir \
+            --index-url https://test.pypi.org/simple/ \
+            --dest "$RUNNER_TEMP/meminfra-testpypi-download" \
+            meminfra==0.1.0
+          test "$(find "$RUNNER_TEMP/meminfra-testpypi-download" -maxdepth 1 -type f -name 'meminfra-0.1.0-py3-none-any.whl' | wc -l)" -eq 1
+      - name: Install TestPyPI wheel with dependencies from PyPI
+        run: |
+          "$RUNNER_TEMP/meminfra-testpypi/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/meminfra-testpypi/bin/python" -m pip install \
+            "$RUNNER_TEMP/meminfra-testpypi-download/meminfra-0.1.0-py3-none-any.whl"
+      - name: Verify installed package
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/meminfra-testpypi/bin/python" -c "from meminfra import MemoryLayer; print(MemoryLayer)"
+          "$RUNNER_TEMP/meminfra-testpypi/bin/python" -c "from importlib.metadata import metadata, version; assert version('meminfra') == '0.1.0'; assert metadata('meminfra')['Name'] == 'meminfra'"
+          "$RUNNER_TEMP/meminfra-testpypi/bin/python" -m pip check
+          "$RUNNER_TEMP/meminfra-testpypi/bin/meminfra" --help
+      - name: Migrate disposable database from published package
+        working-directory: ${{ runner.temp }}
+        env:
+          DATABASE_URL: postgresql+psycopg://meminfra:meminfra_test@localhost:5432/meminfra_test
+          DIRECT_URL: ""
+        run: |
+          "$RUNNER_TEMP/meminfra-testpypi/bin/meminfra" migrate
+          "$RUNNER_TEMP/meminfra-testpypi/bin/python" -c "import os, psycopg; connection = psycopg.connect(os.environ['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://')); revision = connection.execute('select version_num from alembic_version').fetchone()[0]; assert revision == '0005_structured_fact_uniqueness', revision; connection.close()"
+          "$RUNNER_TEMP/meminfra-testpypi/bin/meminfra" migrate
+          "$RUNNER_TEMP/meminfra-testpypi/bin/python" -c "import os, psycopg; connection = psycopg.connect(os.environ['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://')); revision = connection.execute('select version_num from alembic_version').fetchone()[0]; assert revision == '0005_structured_fact_uniqueness', revision; connection.close()"
