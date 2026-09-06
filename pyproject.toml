@@ -8,6 +8,18 @@ version = "0.1.0"
 description = "Foundation for reusable, user-scoped long-term memory infrastructure."
 readme = "README.md"
 requires-python = ">=3.11"
+license = {file = "LICENSE"}
+keywords = ["memory", "llm", "infrastructure", "postgresql"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "alembic>=1.13",
     "openai>=1.0",
@@ -22,6 +34,13 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 
+[project.urls]
+Repository = "https://github.com/banalasaisathwik/memory-layer"
+Issues = "https://github.com/banalasaisathwik/memory-layer/issues"
+
+[project.scripts]
+meminfra = "meminfra.cli:main"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
@@ -34,3 +53,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+meminfra = ["migrations/*.py", "migrations/*.mako", "migrations/versions/*.py"]
