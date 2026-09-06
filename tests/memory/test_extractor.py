@@ -20,15 +20,40 @@ from src.memory.extractor import (
 
 
 class FakeCompletions:
-    """Record completion requests while returning a fully local fake response."""
+    """Record completion requests while returning a fully local fake response.
 
-    def __init__(self, *, content: str | None = None, error: Exception | None = None) -> None:
+    ``content``/``error`` still work as fixed single values used for every
+    call (unchanged behavior for all pre-existing tests). ``responses``, when
+    set, is a queue of ``{"content": ...}`` or ``{"error": ...}`` dicts
+    consumed one per call -- once exhausted, the last entry repeats for any
+    further calls, so a test only needs to specify the responses it cares
+    about.
+    """
+
+    def __init__(
+        self,
+        *,
+        content: str | None = None,
+        error: Exception | None = None,
+        responses: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.content = content
         self.error = error
+        self.responses = responses
         self.calls: list[dict[str, Any]] = []
 
     def create(self, **kwargs: Any) -> SimpleNamespace:
         self.calls.append(kwargs)
+
+        if self.responses is not None:
+            index = min(len(self.calls) - 1, len(self.responses) - 1)
+            step = self.responses[index]
+            if "error" in step:
+                raise step["error"]
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=step.get("content")))],
+            )
+
         if self.error is not None:
             raise self.error
         return SimpleNamespace(
@@ -339,3 +364,152 @@ def test_prompt_excludes_assistant_speculation() -> None:
     assert "never treat assistant-generated claims, guesses, or speculation as user facts" in EXTRACTION_SYSTEM_PROMPT
     assert "CONVERSATION SUMMARY — CONTEXT ONLY" in EXTRACTION_SYSTEM_PROMPT
     assert "RELEVANT OLDER CONTEXT — CONTEXT ONLY" in EXTRACTION_SYSTEM_PROMPT
+
+
+# --- Bounded repair-retry for malformed structured output ---------------------------------
+
+
+def test_valid_first_response_costs_exactly_one_provider_call(fake_completions: FakeCompletions) -> None:
+    memories = _extract(fake_completions, {"memories": [{"memory_text": "User prefers PostgreSQL"}]})
+
+    assert len(memories) == 1
+    assert len(fake_completions.calls) == 1
+
+
+def test_invalid_json_then_valid_response_succeeds_after_one_repair_retry(
+    fake_completions: FakeCompletions,
+) -> None:
+    valid_body = json.dumps({"memories": [{"memory_text": "User prefers PostgreSQL"}]})
+    fake_completions.responses = [
+        {"content": "not json"},
+        {"content": valid_body},
+    ]
+
+    memories = extract_memories([{"role": "user", "content": "I prefer PostgreSQL."}])
+
+    assert len(memories) == 1
+    assert memories[0].memory_text == "User prefers PostgreSQL"
+    assert len(fake_completions.calls) == 2
+    # The retry must carry a repair note in addition to the original request content.
+    second_call_messages = fake_completions.calls[1]["messages"]
+    assert len(second_call_messages) == 3
+    assert "REPAIR INSTRUCTION" in second_call_messages[2]["content"]
+    # The original evidence must be unchanged between attempts.
+    assert fake_completions.calls[0]["messages"][1] == fake_completions.calls[1]["messages"][1]
+
+
+def test_schema_invalid_enum_then_valid_response_succeeds_after_one_repair_retry(
+    fake_completions: FakeCompletions,
+) -> None:
+    invalid_body = json.dumps(
+        {"memories": [{"memory_text": "User prefers PostgreSQL", "memory_type": "unknown_type"}]}
+    )
+    valid_body = json.dumps({"memories": [{"memory_text": "User prefers PostgreSQL"}]})
+    fake_completions.responses = [
+        {"content": invalid_body},
+        {"content": valid_body},
+    ]
+
+    memories = extract_memories([{"role": "user", "content": "I prefer PostgreSQL."}])
+
+    assert len(memories) == 1
+    assert len(fake_completions.calls) == 2
+    second_call_messages = fake_completions.calls[1]["messages"]
+    assert "memory_type" in second_call_messages[2]["content"]
+
+
+def test_out_of_range_importance_then_valid_response_succeeds_after_one_repair_retry(
+    fake_completions: FakeCompletions,
+) -> None:
+    invalid_body = json.dumps(
+        {"memories": [{"memory_text": "User prefers PostgreSQL", "importance": 5.0}]}
+    )
+    valid_body = json.dumps({"memories": [{"memory_text": "User prefers PostgreSQL"}]})
+    fake_completions.responses = [
+        {"content": invalid_body},
+        {"content": valid_body},
+    ]
+
+    memories = extract_memories([{"role": "user", "content": "I prefer PostgreSQL."}])
+
+    assert len(memories) == 1
+    assert len(fake_completions.calls) == 2
+
+
+def test_all_attempts_fail_raises_typed_extraction_error_with_attempt_count(
+    fake_completions: FakeCompletions,
+) -> None:
+    invalid_enum_body = json.dumps(
+        {"memories": [{"memory_text": "User prefers PostgreSQL", "memory_type": "unknown_type"}]}
+    )
+    fake_completions.responses = [
+        {"content": invalid_enum_body},
+        {"content": invalid_enum_body},
+        {"content": "not json"},
+    ]
+
+    with pytest.raises(ExtractionError) as error:
+        extract_memories([{"role": "user", "content": "I prefer PostgreSQL."}])
+
+    assert len(fake_completions.calls) == 3
+    assert error.value.attempt_count == 3
+    # The last attempt failed with invalid JSON, so the reported category reflects that.
+    assert error.value.category == "invalid_json"
+
+
+def test_provider_exception_fails_immediately_without_repair_retry(fake_completions: FakeCompletions) -> None:
+    fake_completions.error = RuntimeError("provider unavailable")
+
+    with pytest.raises(ExtractionError, match="request failed") as error:
+        extract_memories([{"role": "user", "content": "I prefer PostgreSQL."}])
+
+    assert isinstance(error.value.__cause__, RuntimeError)
+    assert len(fake_completions.calls) == 1
+
+
+def test_extraction_failure_never_reaches_a_write_call(
+    fake_completions: FakeCompletions, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """extract_memories() must raise before any write path could be invoked.
+
+    extract_memories() never imports or calls write_memories() itself, so this
+    spies on the module to prove the assumption end-to-end for this file's
+    scope; the call-site guarantee (write_memories() only runs after
+    extract_memories() returns successfully) is exercised in
+    tests/memory/test_writer.py and the MemoryLayer facade tests.
+    """
+
+    from src.memory import writer as writer_module
+
+    write_calls: list[Any] = []
+    monkeypatch.setattr(writer_module, "write_memories", lambda *args, **kwargs: write_calls.append(1))
+
+    fake_completions.content = "not json"
+
+    with pytest.raises(ExtractionError):
+        extract_memories([{"role": "user", "content": "I prefer PostgreSQL."}])
+
+    assert write_calls == []
+
+
+def test_successful_extraction_after_retry_returns_exactly_once(fake_completions: FakeCompletions) -> None:
+    """One extract_memories() call that needs an internal repair retry still
+
+    returns exactly one candidate list from exactly one logical invocation --
+    no duplicate internal success paths.
+    """
+
+    valid_body = json.dumps({"memories": [{"memory_text": "User prefers PostgreSQL"}]})
+    fake_completions.responses = [
+        {"content": "not json"},
+        {"content": valid_body},
+    ]
+
+    memories = extract_memories(
+        [{"role": "user", "content": "I prefer PostgreSQL."}],
+        source_message_ids=[42],
+    )
+
+    assert len(memories) == 1
+    assert memories[0].source_message_ids == [42]
+    assert len(fake_completions.calls) == 2

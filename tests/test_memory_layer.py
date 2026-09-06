@@ -45,15 +45,33 @@ pytestmark = [
 
 
 class FakeCompletions:
-    """Record chat-completion requests while returning a local fake response."""
+    """Record chat-completion requests while returning a local fake response.
 
-    def __init__(self, *, content: str | None = None, error: Exception | None = None) -> None:
+    ``responses``, when set, is a queue of ``{"content": ...}``/``{"error": ...}``
+    dicts consumed one per call (repeating the last entry once exhausted), so
+    a test can simulate a malformed-then-valid sequence across the
+    extractor's own internal repair-retry attempts.
+    """
+
+    def __init__(
+        self,
+        *,
+        content: str | None = None,
+        error: Exception | None = None,
+        responses: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.content = content
         self.error = error
+        self.responses = responses
         self.calls: list[dict[str, Any]] = []
 
     def create(self, **kwargs: Any) -> SimpleNamespace:
         self.calls.append(kwargs)
+        if self.responses is not None:
+            step = self.responses[min(len(self.calls) - 1, len(self.responses) - 1)]
+            if "error" in step:
+                raise step["error"]
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=step.get("content")))])
         if self.error is not None:
             raise self.error
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=self.content))])
@@ -396,6 +414,75 @@ def test_add_propagates_extraction_failure_without_losing_persisted_messages(db,
     assert conversation is not None
     persisted = list(db.scalars(select(Message).where(Message.conversation_id == conversation.id)))
     assert len(persisted) == 1
+
+
+def test_add_writes_zero_memories_when_extraction_exhausts_its_repair_retries(db, fake_extraction) -> None:
+    """A response that stays malformed across all internal repair attempts must
+
+    still leave zero Memory rows for the interaction -- write_memories() is
+    only ever called by MemoryLayer.add() after extract_memories() returns
+    successfully (src/memory_layer.py), so a final extraction failure means no
+    partial write happened.
+    """
+
+    user_id = _unique("user")
+    conversation_id = _unique("conv")
+    fake_extraction.content = "not json"  # malformed on every one of the extractor's 3 internal attempts
+
+    memory = MemoryLayer(db)
+    with pytest.raises(Exception):
+        memory.add(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            messages=[{"role": "user", "content": "This will never parse."}],
+        )
+
+    user = db.scalar(select(User).where(User.external_id == user_id))
+    assert user is not None
+    written = list(db.scalars(select(Memory).where(Memory.user_id == user.id)))
+    assert written == []
+    # The extractor retried internally up to its 3-attempt cap.
+    assert len(fake_extraction.calls) == 3
+
+
+def test_add_writes_exactly_one_memory_batch_when_extraction_needed_an_internal_retry(
+    db, fake_extraction
+) -> None:
+    """One MemoryLayer.add() call that required an internal extraction repair
+
+    retry must still produce exactly one write batch for the interaction, not
+    two -- extract_memories() is called once per interaction and only returns
+    once, fully resolved.
+    """
+
+    user_id = _unique("user")
+    conversation_id = _unique("conv")
+    fake_extraction.responses = [
+        {"content": "not json"},
+        {
+            "content": _extraction_payload(
+                memory_text="User prefers PostgreSQL.",
+                predicate="database_preference",
+                value="PostgreSQL",
+            )
+        },
+    ]
+
+    memory = MemoryLayer(db)
+    result = memory.add(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        messages=[{"role": "user", "content": "I prefer PostgreSQL."}],
+    )
+
+    assert len(fake_extraction.calls) == 2
+    assert result.extracted_candidate_count == 1
+    assert len(result.write_results) == 1
+
+    user = db.scalar(select(User).where(User.external_id == user_id))
+    written = list(db.scalars(select(Memory).where(Memory.user_id == user.id)))
+    assert len(written) == 1
+    assert written[0].source_message_ids == result.message_ids
 
 
 # -- search(): thin wrapper over search_memories() -------------------------------------
