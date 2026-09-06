@@ -1,135 +1,196 @@
 # Memory Layer
 
-Memory Layer is a small, reusable foundation for applications that need durable, user-scoped long-term memory. It implements the Milestone 1 foundation (configuration, lazy OpenAI-compatible provider clients, a Neon/PostgreSQL connection layer, and the initial SQLAlchemy schema), Milestone 2 deterministic candidate-memory identity, Milestone 3 bounded LLM extraction into validated candidates, Milestone 4 validated PostgreSQL writes with temporal supersession, Milestone 5 bounded conversation context with rolling summaries, Milestone 6 hybrid memory retrieval, Milestone 6.1 semantic old-message context retrieval, and Milestone 7 the public `MemoryLayer` facade.
+A Python library for durable, user-scoped long-term memory in LLM applications.
 
-`extract_memories()` accepts one current user/assistant interaction and returns validated `CandidateMemory` proposals. It can additionally receive a `ConversationContext` containing a rolling summary, recent pre-target messages, and a bounded deduplicated union of lexical and semantic older raw-message matches. That context may resolve references, but the target interaction remains the only source of evidence for a new memory. It does not write to PostgreSQL, generate fact keys or canonical subject IDs, decide mutations, generate embeddings, or retrieve long-term memories. Source message IDs remain application-owned provenance and are deterministically attached after model output is validated.
+Applications send conversations to Memory Layer. It extracts durable memories, updates existing facts deterministically, stores them in PostgreSQL, and retrieves relevant memory with hybrid search. It is memory infrastructure—not a chatbot, agent framework, hosted API, or full context builder.
 
-`write_memories()` validates the existing user, optional conversation, and message provenance before deterministically writing a batch. Known structured facts use exact scoped identity to ADD, NOOP, or SUPERSEDE while preserving historical rows. Open semantic memories use exact normalized-text deduplication only. The write path never calls retrieval, FAISS, or an embedding provider.
+## Install
 
-`search_memories()` reads the durable `Memory` table through deterministic structured lookup, BM25/PostgreSQL full-text search, and exact per-user FAISS cosine search. The results are combined with discounted rank agreement fusion (equal-weight Reciprocal Rank Fusion remains available via `fusion_strategy="rrf"`), and every public search is scoped to one existing user.
+The intended PyPI installation for the 0.1.0 release is:
 
-## Quick Start
+```bash
+pip install meminfra
+```
 
-Most applications do not need to call extraction, context, write, and summary functions individually. `MemoryLayer` is a small facade over that existing pipeline:
+Until the package is published, install from source for development:
+
+```bash
+git clone https://github.com/banalasaisathwik/memory-layer.git
+cd memory-layer
+pip install -e .
+```
+
+## Quickstart
+
+Set the required database and provider configuration, then apply the packaged migrations:
+
+```bash
+meminfra migrate
+```
 
 ```python
-from src import MemoryLayer
-from src.database import SessionLocal
+from meminfra import MemoryLayer
+from meminfra.database import SessionLocal
 
 db = SessionLocal()
 memory = MemoryLayer(db)
 
-result = memory.add(
-    user_id="user_123",
-    conversation_id="conv_1",
-    messages=[{"role": "user", "content": "I prefer PostgreSQL."}],
+memory.add(
+    user_id="user-123",
+    conversation_id="conversation-1",
+    messages=[
+        {
+            "role": "user",
+            "content": "I prefer PostgreSQL for backend projects.",
+        }
+    ],
 )
 
 hits = memory.search(
-    user_id="user_123",
-    query="Which database does the user prefer?",
-    limit=5,
+    user_id="user-123",
+    query="What database do I prefer?",
 )
 
-answer = memory.answer(
-    user_id="user_123",
-    query="Which database does the user prefer?",
-    limit=5,
-)
-print(answer.answer)
+for hit in hits:
+    print(hit.memory_text)
 ```
 
-- `add()` = ingest chat messages, extract candidate memories, write them, and update the rolling summary when enough new history has accumulated. It creates the `User`/`Conversation` scope automatically if it does not already exist, and returns an `AddResult` (`message_ids`, `write_results`, `summary_updated`, `warnings`, `extracted_candidate_count`).
-- `search()` = raw memory retrieval; a thin wrapper over `search_memories()` with unchanged ranking.
-- `answer()` = a convenience LLM reader over `search()` results. It abstains (`AnswerResult.abstained = True`) without an LLM call when nothing is retrieved, and its reader prompt is grounded strictly in the retrieved memory text.
+`add()` persists the messages, extracts candidates, writes durable memory, and may update the conversation summary. It creates the user and conversation scope when needed. `search()` returns ranked `SearchHit` records for one user.
 
-`MemoryLayer` does not replace the lower-level functions below; it calls them. Use `build_extraction_context()`, `extract_memories()`, `write_memories()`, `update_conversation_summary()`, and `search_memories()` directly when an application needs finer control over one step.
-
-## Prerequisites
-
-- Python 3.11 or newer
-- A Neon PostgreSQL database (or another PostgreSQL database) for local development
-
-## Setup
-
-Create a virtual environment, install the project with test dependencies, then create `.env` from the example.
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-python -m pip install -e ".[dev]"
-Copy-Item .env.example .env
-```
-
-Set `DATABASE_URL` in `.env` to your Neon connection string. Standard `postgresql://...` Neon URLs are accepted and are routed through psycopg 3 automatically. `DATABASE_POOL_SIZE` and `DATABASE_MAX_OVERFLOW` default to 5 to keep the normal Neon connection pool small. Application sessions always use `DATABASE_URL`; Alembic migrations prefer `DIRECT_URL` and otherwise fall back to `DATABASE_URL`. Provider clients are configured independently through the `LLM_*` and `EMBEDDING_*` variables; creating a client never sends a provider request.
-
-## Migrations
-
-Use Alembic for PostgreSQL schema changes. A new empty database can be initialized with:
-
-```powershell
-python -m alembic upgrade head
-```
-
-For an existing Milestones 1-4 development database that was created with `create_tables()`, take a backup, verify it has the current pre-Alembic tables, then establish the known baseline before applying the Milestone 5 change:
-
-```powershell
-python -m alembic stamp 0001_initial_schema
-python -m alembic upgrade head
-```
-
-This adds `conversation_summaries` and safely normalizes `memories.importance` to `FLOAT`; it does not drop or recreate data. Do not stamp a database whose schema has not been verified as the Milestones 1-4 baseline. The Milestone 5 downgrade is intentionally unsupported because converting fractional importance values back to integers would lose data. The Milestone 6 migration adds nullable `memories.embedding` and `memories.embedding_model` columns plus a PostgreSQL `simple`-configuration GIN full-text index; it does not generate embeddings or make provider requests. The Milestone 6.1 migration adds nullable `messages.embedding` and `messages.embedding_model` columns for durable semantic context rebuilding, also without provider requests.
-
-## Search
+To generate an answer grounded in retrieved memory:
 
 ```python
-from src.retrieval import search_memories
-
-hits = search_memories(
-    db,
-    "Which database does the user prefer?",
-    user_external_id="user_123",
-    limit=5,
+result = memory.answer(
+    user_id="user-123",
+    query="What database do I prefer?",
 )
+
+print(result.answer)
 ```
 
-Search defaults to active memories. Pass `SearchFilters(include_history=True)` to include superseded rows, or a `conversation_external_id` filter to restrict results to memories that explicitly originated in that user-owned conversation. Memories with `conversation_id=NULL` are user-level and do not match a conversation filter.
+`answer()` retrieves memory before asking the configured LLM to answer from it. If search finds no memory, it abstains without making an answer-generation call.
 
-FAISS files are local derived state in `FAISS_INDEX_DIR` (default `.memory-layer/faiss`). PostgreSQL stores the durable text, structure, temporal state, embeddings, and embedding model, so missing, stale, or corrupt local files are rebuilt. Automatic synchronization embeds only rows that do not have the currently configured embedding model; it never changes the write pipeline.
+## What happens when you add memory?
 
-## Extraction context
+Memory Layer stores semantic and episodic memories. Structured, single-value semantic facts are updated deterministically; open semantic and episodic memories use conservative duplicate handling. Persisted memories retain source-message provenance.
 
-`build_extraction_context()` keeps the extractor input bounded and target-authoritative:
+| Existing state | New statement | Action |
+| --- | --- | --- |
+| No active database preference | “I use PostgreSQL” | ADD |
+| Same active preference | “I use PostgreSQL” | NOOP |
+| Active database preference | “I switched to SQLite” | SUPERSEDE |
+
+`SUPERSEDE` applies when a supported single-value structured fact changes. The prior memory stays stored for history and provenance, but default retrieval returns active memories only.
+
+Durable memory is user-scoped. Raw-message context is conversation-scoped, while durable memory can be retrieved across that user’s conversations.
+
+## Retrieval
+
+Natural-language retrieval combines BM25 lexical search with FAISS vector search, then ranks candidates with discounted agreement fusion:
 
 ```text
-rolling summary + recent messages + lexical old + semantic old
-    -> deduplicated relevant older context
-    -> target extraction
+BM25 + FAISS vector search → discounted agreement fusion → ranked memories
 ```
 
-Semantic raw-message lookup is per conversation, not per user and not a substitute for `search_memories()`. PostgreSQL persists Message embeddings and remains authoritative; local per-conversation FAISS files are rebuildable derived state. If this optional semantic branch fails, the returned context exposes a sanitized `semantic_retrieval_error` while retaining safe summary, lexical, and recent context.
+The default fusion strategy rewards agreement while allowing a strong result from one branch to remain competitive. Equal reciprocal-rank fusion (RRF) remains available for compatibility and ablation, but is not the default. When you supply structured filters, exact structured lookup is used as an additional retrieval branch; it is not inferred from every query.
 
-## Tests
+PostgreSQL is the durable source of truth for memories and embeddings. Local FAISS indexes are derived retrieval state and rebuild from PostgreSQL when missing, stale, or corrupt.
+
+## Benchmark
+
+Frozen internal LoCoMo results for `conv-30`:
+
+| Metric | Baseline | Current |
+| --- | ---: | ---: |
+| Hit@5 | 0.457 | 0.686 |
+| Recall@5 | 0.426 | 0.657 |
+| MRR | 0.376 | 0.595 |
+
+LoCoMo · `conv-30` · 105 QA · same evaluation protocol.
+
+This is an internal baseline comparison, not a cross-system comparison against another memory product. Hit@5 measures whether relevant memory appears in the top five; Recall@5 measures how much gold evidence appears there; MRR measures how early the first relevant result appears. See [`evals/`](evals/) for the harnesses and adapters.
+
+## Configuration
+
+Configure connections and providers with environment variables. Do not commit credentials.
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL runtime connection |
+| `DIRECT_URL` | Direct PostgreSQL URL for migrations; takes precedence for `meminfra migrate` |
+| `LLM_PROVIDER` | LLM provider (`openai`, `openrouter`, or `openai_compatible`) |
+| `LLM_API_KEY` | LLM provider credential |
+| `LLM_BASE_URL` | Optional custom/OpenAI-compatible LLM endpoint |
+| `LLM_MODEL` | LLM model used for extraction, summaries, and answers |
+| `EMBEDDING_PROVIDER` | Embedding provider |
+| `EMBEDDING_API_KEY` | Embedding provider credential |
+| `EMBEDDING_BASE_URL` | Optional custom/OpenAI-compatible embedding endpoint |
+| `EMBEDDING_MODEL` | Embedding model |
+| `FAISS_INDEX_DIR` | Local directory for derived FAISS indexes |
+
+Minimal example:
+
+```env
+DATABASE_URL=postgresql+psycopg://user:password@host/database
+LLM_PROVIDER=openai
+LLM_API_KEY=your-llm-key
+LLM_MODEL=your-llm-model
+EMBEDDING_PROVIDER=openai
+EMBEDDING_API_KEY=your-embedding-key
+EMBEDDING_MODEL=text-embedding-3-small
+```
+
+`LLM_BASE_URL` and `EMBEDDING_BASE_URL` are optional and are useful for custom or OpenAI-compatible endpoints.
+
+## Database setup
+
+Run migrations after configuring `DATABASE_URL` (or `DIRECT_URL` when the migration connection should differ):
 
 ```bash
+meminfra migrate
+```
+
+This applies the packaged Alembic migrations to the configured PostgreSQL database. For repository development, `python -m alembic upgrade head` also works.
+
+## Public API
+
+`MemoryLayer` is the high-level facade:
+
+```python
+MemoryLayer.add(user_id=..., conversation_id=..., messages=...)
+MemoryLayer.search(user_id=..., query=..., limit=10, filters=None)
+MemoryLayer.answer(user_id=..., query=..., limit=5, filters=None)
+```
+
+- `add` persists messages and extracts or updates durable memory.
+- `search` retrieves ranked memory for one user.
+- `answer` retrieves memory and produces a grounded answer.
+
+The application remains responsible for deciding how retrieved memory is inserted into its final prompt or context.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A[Conversation] --> B[Bounded extraction context]
+    B --> C[LLM extraction]
+    C --> D[Deterministic writer<br/>ADD / NOOP / SUPERSEDE]
+    D --> E[PostgreSQL]
+    E --> F[BM25 + FAISS]
+    F --> G[Discounted agreement fusion]
+    G --> H[Search or grounded answer]
+```
+
+## Development
+
+```bash
+pip install -e ".[dev]"
 python -m pytest
+python -m compileall -q src tests
 ```
 
-Database integration tests run only when `TEST_DATABASE_URL` is set. They never fall back to `DATABASE_URL`, so use a disposable or dedicated test database rather than your production Neon database.
+Database integration tests run only when `TEST_DATABASE_URL` is configured; they never fall back to `DATABASE_URL`. The core memory, retrieval, CLI, and package paths are covered by automated tests.
 
-```powershell
-$env:TEST_DATABASE_URL = "postgresql+psycopg://user:password@host/database"
-python -m pytest
-```
+## License
 
-See [the architecture notes](docs/architecture.md) for the current boundary and the explicitly planned next stages.
-
-## Manual provider smoke test
-
-No provider network request runs as part of the test suite. Once the independently configured `LLM_*` and `EMBEDDING_*` values are present, intentionally run the following command to make one small completion request and one embedding request:
-
-```powershell
-python scripts/provider_smoke.py
-```
-
-The script prints only model metadata, generated content, and embedding dimensions. It never prints configuration values or API keys.
+[MIT](LICENSE)
