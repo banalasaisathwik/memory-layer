@@ -165,6 +165,7 @@ Index(
     "ix_memories_memory_text_fts",
     text("to_tsvector('simple', memory_text)"),
     postgresql_using="gin",
+    _table=Memory.__table__,
 )
 
 # Keep ``create_tables()`` aligned with migration 0005. PostgreSQL, rather than

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from meminfra.database import MemoryType
+from meminfra.database import Memory, MemoryType
 from meminfra.retrieval import SearchFilters
 from meminfra.retrieval.vector import _normalize_embedding
 
@@ -33,7 +33,7 @@ def test_search_filters_reject_blank_values(field: str) -> None:
 
 
 def test_hybrid_migration_adds_embeddings_and_fts_index() -> None:
-    migration = Path("alembic/versions/0003_hybrid_memory_retrieval.py").read_text(encoding="utf-8")
+    migration = Path("src/meminfra/migrations/versions/0003_hybrid_memory_retrieval.py").read_text(encoding="utf-8")
 
     assert 'Column("embedding"' in migration
     assert 'Column("embedding_model"' in migration
@@ -41,8 +41,16 @@ def test_hybrid_migration_adds_embeddings_and_fts_index() -> None:
     assert "postgresql_using=\"gin\"" in migration
 
 
+def test_memory_metadata_matches_the_hybrid_fts_index_definition() -> None:
+    index = next(index for index in Memory.__table__.indexes if index.name == "ix_memories_memory_text_fts")
+
+    assert index.dialect_options["postgresql"]["using"] == "gin"
+    assert len(index.expressions) == 1
+    assert str(index.expressions[0]) == "to_tsvector('simple', memory_text)"
+
+
 def test_message_embedding_migration_is_after_hybrid_memory_retrieval() -> None:
-    migration = Path("alembic/versions/0004_message_embedding_persistence.py").read_text(encoding="utf-8")
+    migration = Path("src/meminfra/migrations/versions/0004_message_embedding_persistence.py").read_text(encoding="utf-8")
 
     assert 'down_revision = "0003_hybrid_memory_retrieval"' in migration
     assert 'add_column("messages", sa.Column("embedding"' in migration
