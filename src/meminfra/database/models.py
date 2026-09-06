@@ -166,3 +166,14 @@ Index(
     text("to_tsvector('simple', memory_text)"),
     postgresql_using="gin",
 )
+
+# Keep ``create_tables()`` aligned with migration 0005. PostgreSQL, rather than
+# a read-then-write check in application code, must reject concurrent active
+# structured facts for the same user and fact key.
+Index(
+    "ix_memories_active_user_fact_key",
+    Memory.user_id,
+    Memory.fact_key,
+    unique=True,
+    postgresql_where=text("is_active = true AND fact_key IS NOT NULL"),
+)
