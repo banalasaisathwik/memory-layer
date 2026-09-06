@@ -300,7 +300,7 @@ def test_shared_ablation_fts_matches_production_search_memories(
     )
 
     production_hits = search_memories(
-        db, query, user_external_id=user.external_id, limit=10, lexical_backend="postgres_fts"
+        db, query, user_external_id=user.external_id, limit=10, lexical_backend="postgres_fts", fusion_strategy="rrf"
     )
     production_ids = [hit.memory_id for hit in production_hits]
 
@@ -342,7 +342,7 @@ def test_shared_ablation_bm25_matches_production_search_memories(
     )
 
     production_hits = search_memories(
-        db, query, user_external_id=user.external_id, limit=10, lexical_backend="bm25"
+        db, query, user_external_id=user.external_id, limit=10, lexical_backend="bm25", fusion_strategy="rrf"
     )
     production_ids = [hit.memory_id for hit in production_hits]
 

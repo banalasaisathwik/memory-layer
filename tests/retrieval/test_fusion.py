@@ -10,6 +10,12 @@ import pytest
 from src.database import Memory, MemoryType
 from src.database.models import Message, MessageRole, utcnow
 from src.retrieval import RRF_K, fuse_message_rankings, reciprocal_rank_fusion
+from src.retrieval.fusion import (
+    current_equal_rrf,
+    discounted_agreement_fusion,
+    fuse_rankings,
+    weighted_reciprocal_rank_fusion,
+)
 
 
 def _memory(*, importance: float = 0.5) -> Memory:
@@ -183,3 +189,145 @@ def test_fuse_message_rankings_rejects_an_invalid_constant() -> None:
 
 def test_fuse_message_rankings_default_k_matches_memory_fusion() -> None:
     assert RRF_K == 60
+
+
+# --------------------------------------------------------------------------
+# Fusion strategy ablation: current_equal_rrf / weighted_rrf / discounted_agreement
+# --------------------------------------------------------------------------
+
+
+def test_current_equal_rrf_is_the_unchanged_production_baseline() -> None:
+    """``current_equal_rrf`` must be the exact same function as reciprocal_rank_fusion.
+
+    This is a named alias, not a reimplementation -- the baseline must never
+    silently drift from what production ``search_memories`` calls.
+    """
+
+    assert current_equal_rrf is reciprocal_rank_fusion
+
+
+def test_weighted_rrf_matches_equal_rrf_at_weight_one() -> None:
+    first = _memory()
+    second = _memory()
+
+    equal = reciprocal_rank_fusion(structured=[], lexical=[first, second], vector=[second, first])
+    weighted = weighted_reciprocal_rank_fusion(
+        structured=[], lexical=[first, second], vector=[second, first], bm25_weight=1.0
+    )
+
+    equal_scores = {str(hit.memory.id): hit.score for hit in equal}
+    weighted_scores = {str(hit.memory.id): hit.score for hit in weighted}
+    assert weighted_scores == pytest.approx(equal_scores)
+
+
+def test_weighted_rrf_reduces_bm25_branch_contribution() -> None:
+    bm25_only = _memory()
+
+    full_weight = weighted_reciprocal_rank_fusion(structured=[], lexical=[bm25_only], vector=[], bm25_weight=1.0)
+    half_weight = weighted_reciprocal_rank_fusion(structured=[], lexical=[bm25_only], vector=[], bm25_weight=0.5)
+
+    assert half_weight[0].score == pytest.approx(0.5 * full_weight[0].score)
+
+
+def test_discounted_agreement_lets_strong_single_branch_beat_weak_dual_branch_agreement() -> None:
+    """The motivating example from the fusion-ablation milestone.
+
+    Gold: vector rank 2, absent from BM25. A generic competitor: BM25 rank
+    20, vector rank 30. Under current equal RRF the competitor (two weak
+    branch hits) outscores the gold (one strong branch hit); discounted
+    agreement with lambda=0.25 must reverse that.
+    """
+
+    gold = _memory()
+    competitor = _memory()
+
+    # Competitor: BM25 rank 20, vector rank 30. Gold: vector rank 2, absent from BM25.
+    bm25_branch = [_memory() for _ in range(19)] + [competitor]
+    vector_branch_full = [_memory() for _ in range(29)] + [competitor]
+    vector_branch_full[1] = gold  # keep gold at vector rank 2 in the same branch list
+
+    current = reciprocal_rank_fusion(structured=[], lexical=bm25_branch, vector=vector_branch_full)
+    current_scores = {str(hit.memory.id): hit.score for hit in current}
+    assert current_scores[str(competitor.id)] > current_scores[str(gold.id)]
+    assert current_scores[str(gold.id)] == pytest.approx(1 / 62)
+    assert current_scores[str(competitor.id)] == pytest.approx(1 / 80 + 1 / 90)
+
+    discounted = discounted_agreement_fusion(
+        structured=[], lexical=bm25_branch, vector=vector_branch_full, lambda_=0.25
+    )
+    discounted_scores = {str(hit.memory.id): hit.score for hit in discounted}
+    assert discounted_scores[str(gold.id)] == pytest.approx(1 / 62)
+    assert discounted_scores[str(competitor.id)] == pytest.approx(1 / 80 + 0.25 * (1 / 90))
+    assert discounted_scores[str(gold.id)] > discounted_scores[str(competitor.id)]
+
+
+def test_discounted_agreement_still_rewards_excellent_dual_branch_agreement() -> None:
+    """A BM25 #1 + vector #2 hit must still beat a weak single-branch-only result."""
+
+    strong_agreement = _memory()
+    weak_solo = _memory()
+
+    fused = discounted_agreement_fusion(
+        structured=[],
+        lexical=[strong_agreement, _memory()],
+        vector=[_memory(), strong_agreement],
+        lambda_=0.25,
+    )
+    solo_fused = discounted_agreement_fusion(structured=[], lexical=[weak_solo], vector=[], lambda_=0.25)
+
+    strong_score = next(hit.score for hit in fused if hit.memory.id == strong_agreement.id)
+    solo_score = solo_fused[0].score
+    assert strong_score > solo_score
+
+
+def test_discounted_agreement_single_branch_has_no_secondary_bonus() -> None:
+    only = _memory()
+    fused = discounted_agreement_fusion(structured=[], lexical=[only], vector=[], lambda_=0.5)
+    assert fused[0].score == pytest.approx(1 / 61)
+
+
+def test_discounted_agreement_rejects_negative_lambda() -> None:
+    with pytest.raises(ValueError, match="lambda_"):
+        discounted_agreement_fusion(structured=[], lexical=[], vector=[], lambda_=-0.1)
+
+
+def test_fuse_rankings_dispatches_by_strategy_name() -> None:
+    only = _memory()
+
+    via_dispatch = fuse_rankings(structured=[], lexical=[only], vector=[], strategy="rrf")
+    via_direct = reciprocal_rank_fusion(structured=[], lexical=[only], vector=[])
+    assert via_dispatch[0].score == pytest.approx(via_direct[0].score)
+
+    via_weighted = fuse_rankings(structured=[], lexical=[only], vector=[], strategy="weighted_rrf", bm25_weight=0.5)
+    assert via_weighted[0].score == pytest.approx(0.5 / 61)
+
+    via_discounted = fuse_rankings(structured=[], lexical=[only], vector=[], strategy="discounted_agreement", lambda_=0.25)
+    assert via_discounted[0].score == pytest.approx(1 / 61)
+
+
+def test_fuse_rankings_rejects_unknown_strategy() -> None:
+    with pytest.raises(ValueError, match="Unknown fusion strategy"):
+        fuse_rankings(structured=[], lexical=[], vector=[], strategy="not_a_strategy")
+
+
+def test_weighted_and_discounted_fusion_keep_the_same_tie_break_order() -> None:
+    """Equal scores must still fall back to importance/is_active/updated_at/id.
+
+    Fusion gains must come from the score function, not a hidden tie-break
+    change -- this pins the same deterministic ordering used by equal RRF.
+    """
+
+    higher_importance = _memory(importance=0.9)
+    lower_importance = _memory(importance=0.1)
+
+    weighted = weighted_reciprocal_rank_fusion(
+        structured=[], lexical=[higher_importance, lower_importance], vector=[lower_importance, higher_importance]
+    )
+    assert weighted[0].score == pytest.approx(weighted[1].score)
+    assert weighted[0].memory.id == higher_importance.id
+
+    discounted = discounted_agreement_fusion(
+        structured=[], lexical=[higher_importance, lower_importance], vector=[lower_importance, higher_importance]
+    )
+    assert discounted[0].score == pytest.approx(discounted[1].score)
+    assert discounted[0].memory.id == higher_importance.id

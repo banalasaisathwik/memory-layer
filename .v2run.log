@@ -1,0 +1,132 @@
+Eval DB: localhost:5433/memory_layer_eval
+Eval DB target: local PostgreSQL
+LoCoMo sample: conv-30  Session: 1/19  FAILED  Total turns processed: 28/369  Elapsed: 17s
+  warning: session 1: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+LoCoMo sample: conv-30  Session: 2/19  Turns in session: 16  Total turns processed: 44/369  Memories written so far: 15  Warnings: 0  Elapsed: 62s
+LoCoMo sample: conv-30  Session: 3/19  Turns in session: 14  Total turns processed: 58/369  Memories written so far: 26  Warnings: 0  Elapsed: 98s
+LoCoMo sample: conv-30  Session: 4/19  Turns in session: 19  Total turns processed: 77/369  Memories written so far: 34  Warnings: 0  Elapsed: 146s
+LoCoMo sample: conv-30  Session: 5/19  Turns in session: 23  Total turns processed: 100/369  Memories written so far: 57  Warnings: 0  Elapsed: 223s
+LoCoMo sample: conv-30  Session: 6/19  Turns in session: 19  Total turns processed: 119/369  Memories written so far: 67  Warnings: 0  Elapsed: 274s
+LoCoMo sample: conv-30  Session: 7/19  Turns in session: 17  Total turns processed: 136/369  Memories written so far: 78  Warnings: 0  Elapsed: 325s
+LoCoMo sample: conv-30  Session: 8/19  FAILED  Total turns processed: 162/369  Elapsed: 355s
+  warning: session 8: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+LoCoMo sample: conv-30  Session: 9/19  Turns in session: 14  Total turns processed: 176/369  Memories written so far: 92  Warnings: 0  Elapsed: 415s
+LoCoMo sample: conv-30  Session: 10/19  FAILED  Total turns processed: 190/369  Elapsed: 444s
+  warning: session 10: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+LoCoMo sample: conv-30  Session: 11/19  Turns in session: 22  Total turns processed: 212/369  Memories written so far: 109  Warnings: 0  Elapsed: 542s
+LoCoMo sample: conv-30  Session: 12/19  FAILED  Total turns processed: 231/369  Elapsed: 555s
+  warning: session 12: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+LoCoMo sample: conv-30  Session: 13/19  FAILED  Total turns processed: 254/369  Elapsed: 600s
+  warning: session 13: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+LoCoMo sample: conv-30  Session: 14/19  FAILED  Total turns processed: 274/369  Elapsed: 615s
+  warning: session 14: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+LoCoMo sample: conv-30  Session: 15/19  FAILED  Total turns processed: 296/369  Elapsed: 666s
+  warning: session 15: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+LoCoMo sample: conv-30  Session: 16/19  Turns in session: 16  Total turns processed: 312/369  Memories written so far: 119  Warnings: 0  Elapsed: 723s
+LoCoMo sample: conv-30  Session: 17/19  Turns in session: 21  Total turns processed: 333/369  Memories written so far: 127  Warnings: 0  Elapsed: 800s
+LoCoMo sample: conv-30  Session: 18/19  Turns in session: 22  Total turns processed: 355/369  Memories written so far: 143  Warnings: 0  Elapsed: 882s
+LoCoMo sample: conv-30  Session: 19/19  FAILED  Total turns processed: 369/369  Elapsed: 896s
+  warning: session 19: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+LoCoMo benchmark run  mode=retrieval  top_k=10  run_at=2026-09-05T16:45:56.106480+00:00
+dataset=locomo10  sha256=79fa87e90f040813...  git_commit=7b1bac3716857fa7e03630083b458d68ba9fd800
+LLM model: google/gemini-2.5-flash  Embedding model: openai/text-embedding-3-small
+Conversations ingested: 1   Questions evaluated: 105
+NOTE: Extraction currently attaches every candidate from one target interaction to that interaction's full source_message_ids, so provenance -- and therefore evidence matching here -- is per-interaction, not yet per-candidate precise.
+
+Retrieval (overall)
+Questions evaluated: 105  (excluded, no gold evidence: 0)
+
+Hit@1:        0.38
+Hit@3:        0.47
+Hit@5:        0.48
+Hit@10:       0.53
+
+Recall@1:     0.37
+Recall@3:     0.45
+Recall@5:     0.46
+Recall@10:    0.49
+
+MRR:          0.43
+Isolation failures: 0
+
+Retrieval (temporal)
+Questions evaluated: 26  (excluded, no gold evidence: 0)
+
+Hit@1:        0.62
+Hit@3:        0.69
+Hit@5:        0.69
+Hit@10:       0.69
+
+Recall@1:     0.62
+Recall@3:     0.69
+Recall@5:     0.69
+Recall@10:    0.69
+
+MRR:          0.65
+Isolation failures: 0
+
+Retrieval (single_hop)
+Questions evaluated: 44  (excluded, no gold evidence: 0)
+
+Hit@1:        0.32
+Hit@3:        0.39
+Hit@5:        0.39
+Hit@10:       0.41
+
+Recall@1:     0.31
+Recall@3:     0.39
+Recall@5:     0.39
+Recall@10:    0.41
+
+MRR:          0.35
+Isolation failures: 0
+
+Retrieval (multi_hop)
+Questions evaluated: 11  (excluded, no gold evidence: 0)
+
+Hit@1:        0.09
+Hit@3:        0.27
+Hit@5:        0.36
+Hit@10:       0.73
+
+Recall@1:     0.05
+Recall@3:     0.12
+Recall@5:     0.17
+Recall@10:    0.31
+
+MRR:          0.23
+Isolation failures: 0
+
+Retrieval (adversarial)
+Questions evaluated: 24  (excluded, no gold evidence: 0)
+
+Hit@1:        0.38
+Hit@3:        0.46
+Hit@5:        0.46
+Hit@10:       0.50
+
+Recall@1:     0.35
+Recall@3:     0.46
+Recall@5:     0.46
+Recall@10:    0.50
+
+MRR:          0.41
+Isolation failures: 0
+
+Retrieval metrics measure whether search() surfaced evidence-grounded memories.
+QA metrics measure whether answer() produced a correct final answer. Never compare the two directly.
+
+Run duration (ingestion + evaluation): 1046.0s
+Message-index sync: 1 full rebuild(s), 18 incremental append(s), 242 unchanged hit(s)
+Sessions ingested: 11   Sessions failed: 8
+Ingestion warnings:
+  - conv-30: session 1: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+  - conv-30: session 8: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+  - conv-30: session 10: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+  - conv-30: session 12: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+  - conv-30: session 13: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+  - conv-30: session 14: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+  - conv-30: session 15: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+  - conv-30: session 19: MemoryLayer.add() failed (ExtractionError: LLM extraction response does not match the required schema.); recovering message provenance from persisted rows, memory extraction for this session is incomplete.
+
+Saved JSON report to evals\results\locomo-v2-conv-30.json

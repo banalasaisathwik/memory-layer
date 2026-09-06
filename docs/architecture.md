@@ -171,7 +171,7 @@ The LLM proposes `CandidateMemory`. Deterministic code owns user scope, conversa
           |                    |                    |
           +--------------------+--------------------+
                                |
-                              RRF
+                  discounted rank agreement fusion
                                |
                          ranked results
 ```
@@ -186,7 +186,7 @@ This long-term Memory index is intentionally distinct from Milestone 6.1 Message
 
 The index may contain historical rows, but default retrieval always requires `is_active = true`. Setting `include_history=True` makes inactive/superseded rows eligible. Vector retrieval oversamples a small multiple of the requested limit before PostgreSQL filters historical rows, so historical candidates do not unnecessarily consume the final result window.
 
-The branches have incompatible raw score scales (structured ordering, PostgreSQL `ts_rank_cd`, and cosine similarity), so they are combined only with Reciprocal Rank Fusion: `sum(1 / (60 + rank))`. Search results expose each branch rank and the RRF score. Importance and timestamps are returned and only provide deterministic secondary tie-breaking; no uncalibrated weighting formula is applied.
+The branches have incompatible raw score scales (structured ordering, PostgreSQL `ts_rank_cd`, and cosine similarity), so they are combined only by reciprocal-rank contributions (`1 / (60 + rank)`), never raw scores. The production default fusion strategy is **discounted rank agreement**: each candidate's score is its strongest branch's reciprocal rank plus a discounted (`lambda = 0.10`) bonus for any additional branches that also matched, so one excellent single-branch match is not routinely outranked by two only-mediocre branch matches. This is the project's current validated default, chosen from a fusion-policy ablation over one frozen LoCoMo conversation sample -- not a claim of universal or state-of-the-art optimality. The previous equal-weight Reciprocal Rank Fusion (`sum(1 / (60 + rank))` across every matching branch) remains available via `search_memories(..., fusion_strategy="rrf")` for backward compatibility and ablation. Search results expose each branch rank and the final fused score. Importance and timestamps are returned and only provide deterministic secondary tie-breaking; no uncalibrated weighting formula is applied.
 
 ### Current retrieval limitations
 

@@ -12,7 +12,19 @@ from .errors import (
     UserNotFoundError,
 )
 from .bm25 import BM25_B, BM25_K1, BM25Hit, bm25_rank, tokenize
-from .fusion import FusedMemory, FusedMessage, RRF_K, fuse_message_rankings, reciprocal_rank_fusion
+from .fusion import (
+    DEFAULT_AGREEMENT_DISCOUNT,
+    FusedMemory,
+    FusedMessage,
+    FusionStrategy,
+    RRF_K,
+    current_equal_rrf,
+    discounted_agreement_fusion,
+    fuse_message_rankings,
+    fuse_rankings,
+    reciprocal_rank_fusion,
+    weighted_reciprocal_rank_fusion,
+)
 from .lexical import bm25_retrieve, lexical_retrieve
 from .schemas import SearchFilters, SearchHit
 from .search import search_memories
@@ -40,10 +52,16 @@ __all__ = [
     "BM25_B",
     "BM25_K1",
     "BM25Hit",
+    "DEFAULT_AGREEMENT_DISCOUNT",
     "EmbeddingError",
     "conversation_message_index_paths",
+    "current_equal_rrf",
+    "discounted_agreement_fusion",
     "FusedMemory",
     "FusedMessage",
+    "FusionStrategy",
+    "fuse_rankings",
+    "weighted_reciprocal_rank_fusion",
     "IndexDimensionMismatchError",
     "IndexModelMismatchError",
     "IndexStateError",

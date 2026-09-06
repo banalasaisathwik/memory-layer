@@ -57,9 +57,11 @@ class DbNetworkCounters:
     full_memory_corpus_loads: int = 0
     bm25_corpus_builds: int = 0
     query_embedding_provider_calls: int = 0
+    query_embedding_cache_hits: int = 0
     vector_searches: int = 0
     fts_queries: int = 0
     diagnostic_reruns: int = 0
+    fusion_computations: int = 0
 
     def render(self, *, question_count: int) -> str:
         lines = [
@@ -68,8 +70,10 @@ class DbNetworkCounters:
             f"  bm25_corpus_builds           = {self.bm25_corpus_builds}  (expected: 1)",
             f"  query_embedding_provider_calls = {self.query_embedding_provider_calls}  "
             f"(expected: <= question_count, cold cache; 0, warm cache)",
+            f"  query_embedding_cache_hits    = {self.query_embedding_cache_hits}",
             f"  vector_searches               = {self.vector_searches}  (expected: question_count)",
             f"  fts_queries                   = {self.fts_queries}  (expected: question_count)",
             f"  diagnostic_reruns             = {self.diagnostic_reruns}  (expected: 0)",
+            f"  fusion_computations           = {self.fusion_computations}",
         ]
         return "\n".join(lines)

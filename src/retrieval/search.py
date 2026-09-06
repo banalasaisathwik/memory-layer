@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from src.database.models import Conversation, User
 
 from .errors import InvalidFilterScopeError, InvalidSearchError, UserNotFoundError
-from .fusion import reciprocal_rank_fusion
+from .fusion import DEFAULT_AGREEMENT_DISCOUNT, FusionStrategy, fuse_rankings
 from .lexical import bm25_retrieve, lexical_retrieve
 from .schemas import SearchFilters, SearchHit
 from .structured import structured_retrieve
@@ -61,14 +61,26 @@ def search_memories(
     limit: int = 10,
     filters: SearchFilters | None = None,
     lexical_backend: LexicalBackend = "bm25",
+    fusion_strategy: FusionStrategy = "discounted_agreement",
 ) -> list[SearchHit]:
     """Search one user's active memories with structured, lexical, and FAISS branches.
 
     ``lexical_backend`` selects the lexical branch: ``"bm25"`` (the default
     production behavior, genuine Okapi BM25 scoring) or ``"postgres_fts"``
     (the original ``websearch_to_tsquery``/``ts_rank_cd`` branch, retained
-    for side-by-side ablation against BM25). Either way, the branch is fused
-    with the structured and vector branches by the same equal-weight RRF.
+    for side-by-side ablation against BM25).
+
+    ``fusion_strategy`` selects how the structured, lexical, and vector
+    branches are combined into one final ranking. The default,
+    ``"discounted_agreement"``, is the project's current validated default
+    (a conv-30 LoCoMo ablation showed +3 net question-level gain over equal
+    RRF at ``agreement_discount=0.10``): it scores each candidate as its
+    strongest branch's reciprocal rank plus a discounted bonus for any
+    additional branches that also matched, so one excellent single-branch
+    match is no longer routinely outranked by two only-mediocre branch
+    matches. ``"rrf"`` reproduces the previous equal-weight
+    ``reciprocal_rank_fusion`` behavior exactly, and remains available for
+    backward compatibility and ablation.
 
     A missing, stale, or corrupt local FAISS index is rebuilt from PostgreSQL
     during the vector branch. That rebuild may call the configured embedding
@@ -108,7 +120,13 @@ def search_memories(
         conversation=conversation,
         limit=limit,
     )
-    fused = reciprocal_rank_fusion(structured=structured, lexical=lexical, vector=vector)
+    fused = fuse_rankings(
+        structured=structured,
+        lexical=lexical,
+        vector=vector,
+        strategy=fusion_strategy,
+        lambda_=DEFAULT_AGREEMENT_DISCOUNT,
+    )
     return [
         SearchHit(
             memory_id=str(hit.memory.id),

@@ -284,6 +284,37 @@ def test_search_memories_lexical_backend_selects_bm25_or_postgres_fts(db, fake_e
     assert all(hit.lexical_rank is None for hit in fts_hits)
 
 
+def test_search_memories_default_fusion_is_discounted_agreement_and_rrf_stays_available(db, fake_embeddings) -> None:
+    """Production milestone: discounted agreement (lambda=0.10) is now the
+    default ``search_memories`` fusion, while ``fusion_strategy="rrf"``
+    reproduces the previous equal-weight behavior exactly."""
+
+    from src.retrieval.fusion import RRF_K, discounted_agreement_fusion, reciprocal_rank_fusion
+    from src.retrieval.structured import structured_retrieve
+    from src.retrieval.schemas import SearchFilters
+    from src.retrieval.lexical import bm25_retrieve
+    from src.retrieval.vector import vector_retrieve
+
+    user = _user(db)
+    _memory(db, user, "Gina opened an online clothing store.")
+    _memory(db, user, "Jon changed jobs.")
+    query = "What clothing business does Gina run?"
+
+    default_hits = search_memories(db, query, user_external_id=user.external_id)
+    rrf_hits = search_memories(db, query, user_external_id=user.external_id, fusion_strategy="rrf")
+
+    filters = SearchFilters()
+    structured = structured_retrieve(db, user=user, filters=filters, conversation=None, limit=50)
+    lexical = bm25_retrieve(db, query, user=user, filters=filters, conversation=None, limit=50)
+    vector = vector_retrieve(db, query, user=user, filters=filters, conversation=None, limit=10)
+
+    expected_default = discounted_agreement_fusion(structured=structured, lexical=lexical, vector=vector, k=RRF_K)
+    expected_rrf = reciprocal_rank_fusion(structured=structured, lexical=lexical, vector=vector, k=RRF_K)
+
+    assert [hit.memory_id for hit in default_hits] == [str(hit.memory.id) for hit in expected_default[:10]]
+    assert [hit.memory_id for hit in rrf_hits] == [str(hit.memory.id) for hit in expected_rrf[:10]]
+
+
 def test_sync_persists_normalized_embeddings_per_user_and_skips_noop_reembedding(db, fake_embeddings) -> None:
     first_user = _user(db)
     second_user = _user(db)

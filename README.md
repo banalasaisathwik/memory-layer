@@ -6,7 +6,7 @@ Memory Layer is a small, reusable foundation for applications that need durable,
 
 `write_memories()` validates the existing user, optional conversation, and message provenance before deterministically writing a batch. Known structured facts use exact scoped identity to ADD, NOOP, or SUPERSEDE while preserving historical rows. Open semantic memories use exact normalized-text deduplication only. The write path never calls retrieval, FAISS, or an embedding provider.
 
-`search_memories()` reads the durable `Memory` table through deterministic structured lookup, PostgreSQL full-text search, and exact per-user FAISS cosine search. The results are combined with Reciprocal Rank Fusion, and every public search is scoped to one existing user.
+`search_memories()` reads the durable `Memory` table through deterministic structured lookup, BM25/PostgreSQL full-text search, and exact per-user FAISS cosine search. The results are combined with discounted rank agreement fusion (equal-weight Reciprocal Rank Fusion remains available via `fusion_strategy="rrf"`), and every public search is scoped to one existing user.
 
 ## Quick Start
 
