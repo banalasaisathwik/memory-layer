@@ -1,0 +1,44 @@
+name: Release candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build release candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install build validation tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+      - name: Build distributions
+        run: python -m build
+      - name: Validate distribution metadata
+        run: python -m twine check dist/*
+      - name: Install wheel in a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/meminfra-release-wheel"
+          "$RUNNER_TEMP/meminfra-release-wheel/bin/python" -m pip install dist/*.whl
+      - name: Smoke test installed wheel outside checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/meminfra-release-wheel/bin/python" -c "from meminfra import MemoryLayer; print(MemoryLayer)"
+          "$RUNNER_TEMP/meminfra-release-wheel/bin/python" -c "from importlib.metadata import version; assert version('meminfra') == '0.1.0'"
+          "$RUNNER_TEMP/meminfra-release-wheel/bin/python" -m pip check
+          "$RUNNER_TEMP/meminfra-release-wheel/bin/meminfra" --help
+      - uses: actions/upload-artifact@v7
+        with:
+          name: meminfra-dist
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7

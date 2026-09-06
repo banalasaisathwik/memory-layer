@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: meminfra
+          POSTGRES_PASSWORD: meminfra_test
+          POSTGRES_DB: meminfra_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U meminfra -d meminfra_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://meminfra:meminfra_test@localhost:5432/meminfra_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Compile sources and tests
+        run: python -m compileall -q src tests
+      # Provider/dataset benchmark evaluation is intentionally outside deterministic package CI.
+      - name: Run release-critical tests
+        run: |
+          python -m pytest tests/memory/ -q
+          python -m pytest tests/retrieval/ -q
+          python -m pytest tests/test_memory_layer.py -q
+          python -m pytest tests/test_cli.py -q
+
+  package:
+    name: Build and verify distribution
+    needs: test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: meminfra
+          POSTGRES_PASSWORD: meminfra_test
+          POSTGRES_DB: meminfra_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U meminfra -d meminfra_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install build validation tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+      - name: Build distributions
+        run: python -m build
+      - name: Validate distribution metadata
+        run: python -m twine check dist/*
+      - name: Inspect wheel contents
+        run: |
+          python -c "import glob, zipfile; wheels = glob.glob('dist/*.whl'); sdists = glob.glob('dist/*.tar.gz'); assert len(wheels) == 1, wheels; assert len(sdists) == 1, sdists; names = zipfile.ZipFile(wheels[0]).namelist(); required = ('meminfra/', 'meminfra/memory_layer.py', 'meminfra/database/', 'meminfra/memory/', 'meminfra/providers/', 'meminfra/retrieval/', 'meminfra/migrations/', 'LICENSE'); forbidden = ('src/', 'tests/', 'evals/', '.memory-layer/', '.env'); assert all(any(name.endswith(item) or item in name for name in names) for item in required), names; assert not any(name.startswith(item) or ('/' + item) in name for name in names for item in forbidden), names"
+      - name: Install the wheel in a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/meminfra-wheel"
+          "$RUNNER_TEMP/meminfra-wheel/bin/python" -m pip install dist/*.whl
+      - name: Smoke test installed wheel outside checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/meminfra-wheel/bin/python" -c "from meminfra import MemoryLayer; print(MemoryLayer)"
+          "$RUNNER_TEMP/meminfra-wheel/bin/python" -c "import meminfra.database, meminfra.memory, meminfra.retrieval"
+          "$RUNNER_TEMP/meminfra-wheel/bin/python" -c "from importlib.metadata import metadata, version; assert version('meminfra') == '0.1.0'; assert metadata('meminfra')['Name'] == 'meminfra'"
+          "$RUNNER_TEMP/meminfra-wheel/bin/python" -m pip check
+          "$RUNNER_TEMP/meminfra-wheel/bin/meminfra" --help
+      - name: Migrate disposable database from installed wheel
+        working-directory: ${{ runner.temp }}
+        env:
+          DATABASE_URL: postgresql+psycopg://meminfra:meminfra_test@localhost:5432/meminfra_test
+          DIRECT_URL: ""
+        run: |
+          "$RUNNER_TEMP/meminfra-wheel/bin/meminfra" migrate
+          "$RUNNER_TEMP/meminfra-wheel/bin/python" -c "import os, psycopg; connection = psycopg.connect(os.environ['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://')); revision = connection.execute('select version_num from alembic_version').fetchone()[0]; assert revision == '0005_structured_fact_uniqueness', revision; connection.close()"
+          "$RUNNER_TEMP/meminfra-wheel/bin/meminfra" migrate
+          "$RUNNER_TEMP/meminfra-wheel/bin/python" -c "import os, psycopg; connection = psycopg.connect(os.environ['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://')); revision = connection.execute('select version_num from alembic_version').fetchone()[0]; assert revision == '0005_structured_fact_uniqueness', revision; connection.close()"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: meminfra-dist
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
