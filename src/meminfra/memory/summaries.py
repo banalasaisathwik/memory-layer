@@ -9,9 +9,9 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
 
-from src.config import get_config
-from src.database.models import Conversation, ConversationSummary, Message
-from src.providers import get_llm_client
+from meminfra.config import get_config
+from meminfra.database.models import Conversation, ConversationSummary, Message
+from meminfra.providers import get_llm_client
 
 from .context import ContextError, _resolve_conversation
 from .prompts import SUMMARY_SYSTEM_PROMPT

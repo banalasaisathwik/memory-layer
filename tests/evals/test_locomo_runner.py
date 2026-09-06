@@ -17,8 +17,8 @@ from uuid import uuid4
 
 import pytest
 
-from src.config import configure, reset_config
-from src.database import SessionLocal, create_tables, reset_engine
+from meminfra.config import configure, reset_config
+from meminfra.database import SessionLocal, create_tables, reset_engine
 from evals.locomo.runner import run_benchmark
 from evals.locomo.schemas import LocomoQA, LocomoSample, LocomoTurn
 
@@ -139,9 +139,9 @@ def configured_test_database() -> None:
 @pytest.fixture
 def fake_extraction(monkeypatch: pytest.MonkeyPatch, tmp_path) -> FakeExtractionCompletions:
     completions = FakeExtractionCompletions()
-    monkeypatch.setattr("src.memory.extractor.get_llm_client", lambda: FakeLLMClient(completions))
-    monkeypatch.setattr("src.retrieval.vector.get_embedding_client", lambda: FakeEmbeddingClient())
-    monkeypatch.setattr("src.retrieval.message_vector.get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr("meminfra.memory.extractor.get_llm_client", lambda: FakeLLMClient(completions))
+    monkeypatch.setattr("meminfra.retrieval.vector.get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr("meminfra.retrieval.message_vector.get_embedding_client", lambda: FakeEmbeddingClient())
     configure(faiss_index_dir=tmp_path, embedding_model="fake-model")
     return completions
 
@@ -174,7 +174,7 @@ def test_run_benchmark_respects_max_questions_budget(fake_extraction) -> None:
 
 def test_run_benchmark_qa_mode_scores_a_normal_question_with_f1(monkeypatch: pytest.MonkeyPatch, fake_extraction) -> None:
     answer_completions = FakeAnswerCompletions("I went hiking in the mountains yesterday.")
-    monkeypatch.setattr("src.memory_layer.get_llm_client", lambda: FakeLLMClient(answer_completions))
+    monkeypatch.setattr("meminfra.memory_layer.get_llm_client", lambda: FakeLLMClient(answer_completions))
 
     run_id = uuid4().hex[:8]
     sample = _sample("conv-e", "Alice", "Bob", "Nice.", "I went hiking in the mountains yesterday.")
@@ -188,7 +188,7 @@ def test_run_benchmark_qa_mode_scores_a_normal_question_with_f1(monkeypatch: pyt
 
 def test_run_benchmark_qa_mode_scores_adversarial_abstention(monkeypatch: pytest.MonkeyPatch, fake_extraction) -> None:
     answer_completions = FakeAnswerCompletions("UNKNOWN")
-    monkeypatch.setattr("src.memory_layer.get_llm_client", lambda: FakeLLMClient(answer_completions))
+    monkeypatch.setattr("meminfra.memory_layer.get_llm_client", lambda: FakeLLMClient(answer_completions))
 
     run_id = uuid4().hex[:8]
     sample = _sample("conv-f", "Alice", "Bob", "Hm.", "I might have visited Paris once.")

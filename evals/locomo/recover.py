@@ -13,7 +13,7 @@ already-persisted ``Message`` rows -- it never calls ``MemoryLayer.add()``
 again and never inserts a ``Message`` row. It reuses the production
 ``build_extraction_context`` / ``extract_memories`` / ``write_memories``
 functions and the same interaction-grouping policy as
-``MemoryLayer.add()`` (``src.memory_layer._group_interactions``), so recovered
+``MemoryLayer.add()`` (``meminfra.memory_layer._group_interactions``), so recovered
 memories are written through the exact same deterministic ADD/NOOP/SUPERSEDE
 rules as a normal ingestion run.
 
@@ -64,9 +64,9 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.database.models import Conversation, Memory, Message, User
-from src.memory import ExtractionError, WriteError, WriteResult, build_extraction_context, extract_memories, write_memories
-from src.memory_layer import _group_interactions
+from meminfra.database.models import Conversation, Memory, Message, User
+from meminfra.memory import ExtractionError, WriteError, WriteResult, build_extraction_context, extract_memories, write_memories
+from meminfra.memory_layer import _group_interactions
 
 from .schemas import LocomoSample
 
@@ -624,8 +624,8 @@ def render_dry_run_report(report: RecoveryReport) -> str:
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    from src.config import configure, get_config, reset_config
-    from src.database import SessionLocal, create_tables, reset_engine
+    from meminfra.config import configure, get_config, reset_config
+    from meminfra.database import SessionLocal, create_tables, reset_engine
 
     from ..db import EvalDatabaseConfigError, get_eval_database_url, print_eval_database_banner
     from .dataset import DEFAULT_DATASET_PATH, load_locomo_dataset

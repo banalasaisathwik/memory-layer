@@ -12,8 +12,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select
 
-from src.config import configure, reset_config
-from src.database import (
+from meminfra.config import configure, reset_config
+from meminfra.database import (
     Conversation,
     ConversationSummary,
     Message,
@@ -23,7 +23,7 @@ from src.database import (
     create_tables,
     reset_engine,
 )
-from src.memory import SummaryError, update_conversation_summary
+from meminfra.memory import SummaryError, update_conversation_summary
 
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
@@ -77,7 +77,7 @@ def db():
 @pytest.fixture
 def fake_completions(monkeypatch: pytest.MonkeyPatch) -> FakeCompletions:
     completions = FakeCompletions()
-    monkeypatch.setattr("src.memory.summaries.get_llm_client", lambda: FakeClient(completions))
+    monkeypatch.setattr("meminfra.memory.summaries.get_llm_client", lambda: FakeClient(completions))
     return completions
 
 

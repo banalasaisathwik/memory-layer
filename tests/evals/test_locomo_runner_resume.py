@@ -18,8 +18,8 @@ from uuid import uuid4
 
 import pytest
 
-from src.config import configure, reset_config
-from src.database import create_tables, reset_engine
+from meminfra.config import configure, reset_config
+from meminfra.database import create_tables, reset_engine
 
 from evals.locomo.checkpoint import load_checkpoint, new_checkpoint, save_checkpoint
 from evals.locomo.runner import LocomoEnvironmentError, run_benchmark
@@ -96,9 +96,9 @@ def configured_test_database() -> None:
 @pytest.fixture
 def fake_extraction(monkeypatch: pytest.MonkeyPatch, tmp_path) -> FakeExtractionCompletions:
     completions = FakeExtractionCompletions()
-    monkeypatch.setattr("src.memory.extractor.get_llm_client", lambda: FakeLLMClient(completions))
-    monkeypatch.setattr("src.retrieval.vector.get_embedding_client", lambda: FakeEmbeddingClient())
-    monkeypatch.setattr("src.retrieval.message_vector.get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr("meminfra.memory.extractor.get_llm_client", lambda: FakeLLMClient(completions))
+    monkeypatch.setattr("meminfra.retrieval.vector.get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr("meminfra.retrieval.message_vector.get_embedding_client", lambda: FakeEmbeddingClient())
     configure(faiss_index_dir=tmp_path, embedding_model="fake-model")
     return completions
 

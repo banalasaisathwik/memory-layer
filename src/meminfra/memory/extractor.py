@@ -9,8 +9,8 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, TypeAdapter, ValidationError
 
-from src.config import get_config
-from src.providers import get_llm_client
+from meminfra.config import get_config
+from meminfra.providers import get_llm_client
 
 from .context import ChatMessage, ConversationContext
 from .prompts import EXTRACTION_SYSTEM_PROMPT

@@ -26,7 +26,7 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.database.models import Memory, User
+from meminfra.database.models import Memory, User
 
 from .schemas import LocomoRunReport, QuestionDiagnostic, RetrievalAggregate
 
@@ -197,8 +197,8 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
     import json as _json
 
-    from src.config import configure, reset_config
-    from src.database import SessionLocal, create_tables, reset_engine
+    from meminfra.config import configure, reset_config
+    from meminfra.database import SessionLocal, create_tables, reset_engine
 
     from ..db import EvalDatabaseConfigError, get_eval_database_url, print_eval_database_banner
     from .recover import build_dia_id_mapping, session_message_slices
@@ -243,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         with SessionLocal() as db:
-            from src.database.models import Conversation, User as UserModel
+            from meminfra.database.models import Conversation, User as UserModel
             from sqlalchemy import select as _select
 
             user = db.scalar(_select(UserModel).where(UserModel.external_id == user_id))

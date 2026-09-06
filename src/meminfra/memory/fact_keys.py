@@ -6,7 +6,7 @@ import re
 import unicodedata
 from urllib.parse import quote
 
-from src.database.models import MemoryType
+from meminfra.database.models import MemoryType
 
 from .predicates import get_predicate_cardinality, resolve_predicate
 from .schemas import CandidateMemory

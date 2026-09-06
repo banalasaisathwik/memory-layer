@@ -10,7 +10,7 @@ pure repeated network cost for data that cannot have changed.
 ``BenchmarkState`` loads that corpus exactly once per (user, sample) and is
 then reused read-only for every question. The vector branch deliberately
 does *not* preload embedding vectors here: it still goes through
-``src.retrieval.vector``'s FAISS index + cheap id-only sync check (the
+``meminfra.retrieval.vector``'s FAISS index + cheap id-only sync check (the
 Part A fast path), which is already the cheap way to serve per-query vector
 search without re-downloading every embedding on each call.
 
@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.database.models import Conversation, Memory, User
+from meminfra.database.models import Conversation, Memory, User
 
 from .bm25_corpus import PreparedBM25Corpus, prepare_bm25_corpus
 from .diagnose import active_memory_covered_dia_ids

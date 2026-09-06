@@ -7,7 +7,7 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.database.models import Conversation, User
+from meminfra.database.models import Conversation, User
 
 from .errors import InvalidFilterScopeError, InvalidSearchError, UserNotFoundError
 from .fusion import DEFAULT_AGREEMENT_DISCOUNT, FusionStrategy, fuse_rankings

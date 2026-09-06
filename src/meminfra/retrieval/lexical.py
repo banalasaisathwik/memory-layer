@@ -4,7 +4,7 @@ Both backends share the same user/conversation/state scope conditions from
 ``memory_filter_conditions``. ``lexical_retrieve`` (PostgreSQL
 ``websearch_to_tsquery``/``ts_rank_cd``) is retained for ablation/comparison
 against ``bm25_retrieve``; production retrieval uses BM25 (see
-``src.retrieval.search``).
+``meminfra.retrieval.search``).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from src.database.models import Conversation, Memory, User
+from meminfra.database.models import Conversation, Memory, User
 
 from .bm25 import bm25_rank
 from .schemas import SearchFilters

@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.database import MemoryType
-from src.retrieval import SearchFilters
-from src.retrieval.vector import _normalize_embedding
+from meminfra.database import MemoryType
+from meminfra.retrieval import SearchFilters
+from meminfra.retrieval.vector import _normalize_embedding
 
 
 def test_search_filters_support_explicit_structure_and_history() -> None:

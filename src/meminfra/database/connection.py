@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session
 
-from src.config import get_config
+from meminfra.config import get_config
 
 
 _engine: Engine | None = None
@@ -61,7 +61,7 @@ def SessionLocal() -> Session:
 def create_tables() -> None:
     """Create the current schema in the configured database if it is absent."""
 
-    from src.database.models import Base
+    from meminfra.database.models import Base
 
     Base.metadata.create_all(get_engine())
 

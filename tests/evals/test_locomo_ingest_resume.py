@@ -19,8 +19,8 @@ from uuid import uuid4
 
 import pytest
 
-from src.config import configure, reset_config
-from src.database import Message, SessionLocal, create_tables, reset_engine
+from meminfra.config import configure, reset_config
+from meminfra.database import Message, SessionLocal, create_tables, reset_engine
 from evals.locomo.dataset import load_locomo_dataset
 from evals.locomo.ingest import LocomoResumeAmbiguousError, ingest_sample
 from evals.locomo.schemas import LocomoSample
@@ -80,9 +80,9 @@ def db():
 @pytest.fixture
 def fake_providers(monkeypatch: pytest.MonkeyPatch, tmp_path) -> FakeCompletions:
     completions = FakeCompletions()
-    monkeypatch.setattr("src.memory.extractor.get_llm_client", lambda: FakeLLMClient(completions))
-    monkeypatch.setattr("src.retrieval.vector.get_embedding_client", lambda: FakeEmbeddingClient())
-    monkeypatch.setattr("src.retrieval.message_vector.get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr("meminfra.memory.extractor.get_llm_client", lambda: FakeLLMClient(completions))
+    monkeypatch.setattr("meminfra.retrieval.vector.get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr("meminfra.retrieval.message_vector.get_embedding_client", lambda: FakeEmbeddingClient())
     configure(faiss_index_dir=tmp_path, embedding_model="fake-model")
     return completions
 

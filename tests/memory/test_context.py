@@ -8,8 +8,8 @@ from uuid import uuid4
 
 import pytest
 
-from src.config import configure, reset_config
-from src.database import (
+from meminfra.config import configure, reset_config
+from meminfra.database import (
     Conversation,
     ConversationSummary,
     Message,
@@ -19,7 +19,7 @@ from src.database import (
     create_tables,
     reset_engine,
 )
-from src.memory import ContextError, build_extraction_context
+from meminfra.memory import ContextError, build_extraction_context
 
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")

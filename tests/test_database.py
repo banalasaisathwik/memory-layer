@@ -10,8 +10,8 @@ import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
-from src.config import configure, reset_config
-from src.database import (
+from meminfra.config import configure, reset_config
+from meminfra.database import (
     Conversation,
     Memory,
     MemoryType,
@@ -23,7 +23,7 @@ from src.database import (
     get_engine,
     reset_engine,
 )
-from src.database.models import utcnow
+from meminfra.database.models import utcnow
 
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")

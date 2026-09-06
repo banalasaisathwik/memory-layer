@@ -19,8 +19,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-from src.config import configure, reset_config
-from src.database import (
+from meminfra.config import configure, reset_config
+from meminfra.database import (
     Conversation,
     ConversationSummary,
     Memory,
@@ -30,8 +30,8 @@ from src.database import (
     create_tables,
     reset_engine,
 )
-from src.memory_layer import AnswerError, MemoryLayer, MemoryLayerError
-from src.retrieval import UserNotFoundError
+from meminfra.memory_layer import AnswerError, MemoryLayer, MemoryLayerError
+from meminfra.retrieval import UserNotFoundError
 
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
@@ -151,29 +151,29 @@ def fake_embeddings(monkeypatch: pytest.MonkeyPatch, tmp_path) -> FakeEmbeddingC
 
     client = FakeEmbeddingClient()
     configure(embedding_model="fake-model", faiss_index_dir=tmp_path, vector_candidate_multiplier=5)
-    monkeypatch.setattr("src.retrieval.message_vector.get_embedding_client", lambda: client)
-    monkeypatch.setattr("src.retrieval.vector.get_embedding_client", lambda: client)
+    monkeypatch.setattr("meminfra.retrieval.message_vector.get_embedding_client", lambda: client)
+    monkeypatch.setattr("meminfra.retrieval.vector.get_embedding_client", lambda: client)
     return client
 
 
 @pytest.fixture
 def fake_extraction(monkeypatch: pytest.MonkeyPatch) -> FakeCompletions:
     completions = FakeCompletions(content=_EMPTY_EXTRACTION_PAYLOAD)
-    monkeypatch.setattr("src.memory.extractor.get_llm_client", lambda: FakeClient(completions))
+    monkeypatch.setattr("meminfra.memory.extractor.get_llm_client", lambda: FakeClient(completions))
     return completions
 
 
 @pytest.fixture
 def fake_summary(monkeypatch: pytest.MonkeyPatch) -> FakeCompletions:
     completions = FakeCompletions(content="Updated summary.")
-    monkeypatch.setattr("src.memory.summaries.get_llm_client", lambda: FakeClient(completions))
+    monkeypatch.setattr("meminfra.memory.summaries.get_llm_client", lambda: FakeClient(completions))
     return completions
 
 
 @pytest.fixture
 def fake_answer(monkeypatch: pytest.MonkeyPatch) -> FakeCompletions:
     completions = FakeCompletions(content="UNKNOWN")
-    monkeypatch.setattr("src.memory_layer.get_llm_client", lambda: FakeClient(completions))
+    monkeypatch.setattr("meminfra.memory_layer.get_llm_client", lambda: FakeClient(completions))
     return completions
 
 

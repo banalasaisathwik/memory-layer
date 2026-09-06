@@ -7,10 +7,10 @@ from uuid import uuid4
 
 import pytest
 
-from src.database import Memory, MemoryType
-from src.database.models import Message, MessageRole, utcnow
-from src.retrieval import RRF_K, fuse_message_rankings, reciprocal_rank_fusion
-from src.retrieval.fusion import (
+from meminfra.database import Memory, MemoryType
+from meminfra.database.models import Message, MessageRole, utcnow
+from meminfra.retrieval import RRF_K, fuse_message_rankings, reciprocal_rank_fusion
+from meminfra.retrieval.fusion import (
     current_equal_rrf,
     discounted_agreement_fusion,
     fuse_rankings,

@@ -11,7 +11,7 @@ Flow for one EvalCase:
              -> CaseResult
 
 This module never reimplements extraction, writing, or retrieval; it only
-calls the existing src.memory / src.retrieval APIs and scores what comes
+calls the existing meminfra.memory / meminfra.retrieval APIs and scores what comes
 back.
 """
 
@@ -25,10 +25,10 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from src.config import configure, get_config, reset_config
-from src.database import Conversation, Memory, Message, MessageRole, SessionLocal, User, create_tables, reset_engine
-from src.memory import build_extraction_context, extract_memories, write_memories
-from src.retrieval import search_memories
+from meminfra.config import configure, get_config, reset_config
+from meminfra.database import Conversation, Memory, Message, MessageRole, SessionLocal, User, create_tables, reset_engine
+from meminfra.memory import build_extraction_context, extract_memories, write_memories
+from meminfra.retrieval import search_memories
 
 from .datasets import DATASETS
 from .db import EvalDatabaseConfigError, get_eval_database_url, print_eval_database_banner

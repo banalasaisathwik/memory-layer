@@ -8,7 +8,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.orm import Session
 
-from src.database.models import Conversation, Memory, User
+from meminfra.database.models import Conversation, Memory, User
 
 from .schemas import SearchFilters
 

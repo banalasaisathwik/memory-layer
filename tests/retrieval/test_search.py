@@ -9,9 +9,9 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import inspect
 
-from src.config import configure, reset_config
-from src.database import Conversation, Memory, MemoryType, SessionLocal, User, create_tables, reset_engine
-from src.retrieval import (
+from meminfra.config import configure, reset_config
+from meminfra.database import Conversation, Memory, MemoryType, SessionLocal, User, create_tables, reset_engine
+from meminfra.retrieval import (
     EmbeddingError,
     IndexDimensionMismatchError,
     InvalidFilterScopeError,
@@ -94,7 +94,7 @@ def fake_embeddings(monkeypatch: pytest.MonkeyPatch, tmp_path) -> FakeEmbeddingC
         faiss_index_dir=tmp_path,
         vector_candidate_multiplier=5,
     )
-    monkeypatch.setattr("src.retrieval.vector.get_embedding_client", lambda: client)
+    monkeypatch.setattr("meminfra.retrieval.vector.get_embedding_client", lambda: client)
     return client
 
 
@@ -289,11 +289,11 @@ def test_search_memories_default_fusion_is_discounted_agreement_and_rrf_stays_av
     default ``search_memories`` fusion, while ``fusion_strategy="rrf"``
     reproduces the previous equal-weight behavior exactly."""
 
-    from src.retrieval.fusion import RRF_K, discounted_agreement_fusion, reciprocal_rank_fusion
-    from src.retrieval.structured import structured_retrieve
-    from src.retrieval.schemas import SearchFilters
-    from src.retrieval.lexical import bm25_retrieve
-    from src.retrieval.vector import vector_retrieve
+    from meminfra.retrieval.fusion import RRF_K, discounted_agreement_fusion, reciprocal_rank_fusion
+    from meminfra.retrieval.structured import structured_retrieve
+    from meminfra.retrieval.schemas import SearchFilters
+    from meminfra.retrieval.lexical import bm25_retrieve
+    from meminfra.retrieval.vector import vector_retrieve
 
     user = _user(db)
     _memory(db, user, "Gina opened an online clothing store.")
@@ -457,7 +457,7 @@ def test_dimension_mismatch_and_embedding_provider_failure_are_explicit(db, fake
         def create(self, *, model: str, input: list[str]) -> SimpleNamespace:
             return SimpleNamespace(data=[SimpleNamespace(index=0, embedding=[1.0, 0.0, 0.0])])
 
-    monkeypatch.setattr("src.retrieval.vector.get_embedding_client", lambda: DimensionMismatchClient())
+    monkeypatch.setattr("meminfra.retrieval.vector.get_embedding_client", lambda: DimensionMismatchClient())
     with pytest.raises(IndexDimensionMismatchError, match="dimension"):
         search_memories(db, "Which database does the user prefer?", user_external_id=user.external_id)
 
@@ -470,7 +470,7 @@ def test_dimension_mismatch_and_embedding_provider_failure_are_explicit(db, fake
         def create(self, *, model: str, input: list[str]) -> SimpleNamespace:
             raise RuntimeError("provider unavailable")
 
-    monkeypatch.setattr("src.retrieval.vector.get_embedding_client", lambda: FailingEmbeddingClient())
+    monkeypatch.setattr("meminfra.retrieval.vector.get_embedding_client", lambda: FailingEmbeddingClient())
     with pytest.raises(EmbeddingError, match="could not generate"):
         search_memories(db, "Which database does the user prefer?", user_external_id=user.external_id)
 

@@ -18,10 +18,10 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select
 
-from src.config import configure, reset_config
-from src.database import Memory, SessionLocal, User, create_tables, reset_engine
-from src.memory import CandidateMemory, WriteAction, WriteConflictError, write_memories
-from src.memory import writer as writer_module
+from meminfra.config import configure, reset_config
+from meminfra.database import Memory, SessionLocal, User, create_tables, reset_engine
+from meminfra.memory import CandidateMemory, WriteAction, WriteConflictError, write_memories
+from meminfra.memory import writer as writer_module
 
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")

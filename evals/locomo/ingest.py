@@ -43,9 +43,9 @@ from typing import Callable
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from src.database.models import Conversation, Message, User
-from src.memory import ExtractionError, WriteError
-from src.memory_layer import AddResult, MemoryLayer
+from meminfra.database.models import Conversation, Message, User
+from meminfra.memory import ExtractionError, WriteError
+from meminfra.memory_layer import AddResult, MemoryLayer
 
 from .schemas import LocomoSample, LocomoTurn
 

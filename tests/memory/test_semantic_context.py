@@ -11,10 +11,10 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import inspect
 
-from src.config import configure, reset_config
-from src.database import Conversation, Message, MessageRole, SessionLocal, User, create_tables, reset_engine
-from src.memory import build_extraction_context, retrieve_semantic_message_context
-from src.retrieval import (
+from meminfra.config import configure, reset_config
+from meminfra.database import Conversation, Message, MessageRole, SessionLocal, User, create_tables, reset_engine
+from meminfra.memory import build_extraction_context, retrieve_semantic_message_context
+from meminfra.retrieval import (
     IndexDimensionMismatchError,
     IndexModelMismatchError,
     conversation_message_index_paths,
@@ -105,7 +105,7 @@ def fake_embeddings(monkeypatch: pytest.MonkeyPatch, tmp_path) -> FakeEmbeddingC
         extraction_semantic_messages=3,
         extraction_old_messages=6,
     )
-    monkeypatch.setattr("src.retrieval.message_vector.get_embedding_client", lambda: client)
+    monkeypatch.setattr("meminfra.retrieval.message_vector.get_embedding_client", lambda: client)
     return client
 
 
@@ -379,7 +379,7 @@ def test_context_merges_lexical_and_semantic_old_messages_once_and_degrades_expl
 
     another_target = _message(db, conversation, number=6, content="component reference meaning again")
     monkeypatch.setattr(
-        "src.retrieval.message_vector.get_embedding_client", lambda: FailingEmbeddingClient()
+        "meminfra.retrieval.message_vector.get_embedding_client", lambda: FailingEmbeddingClient()
     )
     failed_context = build_extraction_context(
         db,

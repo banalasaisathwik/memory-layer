@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, StatementError
 from sqlalchemy.orm import Session
 
-from src.database.models import Conversation, Memory, MemoryType, Message, User, utcnow
+from meminfra.database.models import Conversation, Memory, MemoryType, Message, User, utcnow
 
 from .fact_keys import build_fact_key, normalize_subject_type, normalize_value_identity
 from .predicates import resolve_predicate

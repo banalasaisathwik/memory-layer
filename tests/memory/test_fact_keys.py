@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.memory import CandidateMemory, build_fact_key
+from meminfra.memory import CandidateMemory, build_fact_key
 
 
 def _semantic_candidate(**overrides: object) -> CandidateMemory:

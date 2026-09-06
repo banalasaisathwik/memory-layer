@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "memory-layer"
+name = "meminfra"
 version = "0.1.0"
 description = "Foundation for reusable, user-scoped long-term memory infrastructure."
 readme = "README.md"
@@ -30,4 +30,7 @@ markers = [
 ]
 
 [tool.setuptools]
-packages = ["src", "src.database", "src.memory", "src.providers", "src.retrieval"]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -26,10 +26,10 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.config import configure, get_config, reset_config
-from src.database import Memory, SessionLocal, User, create_tables, reset_engine
-from src.memory_layer import AddResult, AnswerError, MemoryLayer
-from src.retrieval import MessageIndexSyncStats, get_message_index_sync_stats, reset_message_index_sync_stats
+from meminfra.config import configure, get_config, reset_config
+from meminfra.database import Memory, SessionLocal, User, create_tables, reset_engine
+from meminfra.memory_layer import AddResult, AnswerError, MemoryLayer
+from meminfra.retrieval import MessageIndexSyncStats, get_message_index_sync_stats, reset_message_index_sync_stats
 
 from .checkpoint import load_checkpoint, new_checkpoint, save_checkpoint
 from .dataset import DATASET_SOURCE_URL, DEFAULT_DATASET_PATH, dataset_sha256, load_locomo_dataset

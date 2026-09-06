@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from src.database import MemoryType
-from src.memory import CandidateMemory
+from meminfra.database import MemoryType
+from meminfra.memory import CandidateMemory
 
 
 def test_valid_structured_semantic_candidate() -> None:

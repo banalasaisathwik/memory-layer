@@ -36,11 +36,11 @@ import numpy as np
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from src.database.models import Conversation, ConversationSummary, Memory, Message, User
-from src.retrieval.fusion import RRF_K, discounted_agreement_fusion, reciprocal_rank_fusion, weighted_reciprocal_rank_fusion
-from src.retrieval.search import _BRANCH_CANDIDATE_MULTIPLIER, _MAX_SEARCH_LIMIT
-from src.retrieval.structured import structured_retrieve
-from src.retrieval.schemas import SearchFilters
+from meminfra.database.models import Conversation, ConversationSummary, Memory, Message, User
+from meminfra.retrieval.fusion import RRF_K, discounted_agreement_fusion, reciprocal_rank_fusion, weighted_reciprocal_rank_fusion
+from meminfra.retrieval.search import _BRANCH_CANDIDATE_MULTIPLIER, _MAX_SEARCH_LIMIT
+from meminfra.retrieval.structured import structured_retrieve
+from meminfra.retrieval.schemas import SearchFilters
 
 from .ablate_lexical import (
     _diagnostic_from_fused,
@@ -500,8 +500,8 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
     import subprocess
 
-    from src.config import configure, get_config, reset_config
-    from src.database import SessionLocal, create_tables, reset_engine
+    from meminfra.config import configure, get_config, reset_config
+    from meminfra.database import SessionLocal, create_tables, reset_engine
 
     from ..db import EvalDatabaseConfigError, get_eval_database_url, print_eval_database_banner
     from .dataset import DEFAULT_DATASET_PATH, dataset_sha256, load_locomo_dataset

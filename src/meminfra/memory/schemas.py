@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.database.models import MemoryType
+from meminfra.database.models import MemoryType
 
 
 class CandidateMemory(BaseModel):

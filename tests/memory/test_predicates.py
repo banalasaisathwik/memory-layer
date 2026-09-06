@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.memory import PREDICATES, get_predicate_cardinality, resolve_predicate
+from meminfra.memory import PREDICATES, get_predicate_cardinality, resolve_predicate
 
 
 def test_canonical_predicate_resolves() -> None:

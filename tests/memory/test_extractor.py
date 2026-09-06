@@ -9,10 +9,10 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from src.config import configure, reset_config
-from src.database import MemoryType
-from src.memory.context import ChatMessage, ConversationContext
-from src.memory.extractor import (
+from meminfra.config import configure, reset_config
+from meminfra.database import MemoryType
+from meminfra.memory.context import ChatMessage, ConversationContext
+from meminfra.memory.extractor import (
     EXTRACTION_SYSTEM_PROMPT,
     ExtractionError,
     extract_memories,
@@ -81,7 +81,7 @@ def configured_extractor() -> None:
 @pytest.fixture
 def fake_completions(monkeypatch: pytest.MonkeyPatch) -> FakeCompletions:
     completions = FakeCompletions()
-    monkeypatch.setattr("src.memory.extractor.get_llm_client", lambda: FakeClient(completions))
+    monkeypatch.setattr("meminfra.memory.extractor.get_llm_client", lambda: FakeClient(completions))
     return completions
 
 
@@ -479,7 +479,7 @@ def test_extraction_failure_never_reaches_a_write_call(
     tests/memory/test_writer.py and the MemoryLayer facade tests.
     """
 
-    from src.memory import writer as writer_module
+    from meminfra.memory import writer as writer_module
 
     write_calls: list[Any] = []
     monkeypatch.setattr(writer_module, "write_memories", lambda *args, **kwargs: write_calls.append(1))

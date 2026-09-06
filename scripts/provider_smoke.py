@@ -14,8 +14,8 @@ from pathlib import Path
 # import path, so add the project root without relying on package installation.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.config import get_config
-from src.providers import get_embedding_client, get_llm_client
+from meminfra.config import get_config
+from meminfra.providers import get_embedding_client, get_llm_client
 
 
 def main() -> None:

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from src.config import configure, get_config, get_migration_database_url, reset_config
-from src.database.connection import get_engine, reset_engine
-from src.providers import reset_embedding_client, reset_llm_client
+from meminfra.config import configure, get_config, get_migration_database_url, reset_config
+from meminfra.database.connection import get_engine, reset_engine
+from meminfra.providers import reset_embedding_client, reset_llm_client
 
 
 @pytest.fixture(autouse=True)
@@ -118,7 +118,7 @@ def test_context_settings_must_be_positive(setting: str, value: int) -> None:
 def test_metadata_includes_summary_table_and_float_importance() -> None:
     from sqlalchemy import Float
 
-    from src.database.models import Base
+    from meminfra.database.models import Base
 
     summary = Base.metadata.tables["conversation_summaries"]
     assert summary.c.conversation_id.unique is True
@@ -149,8 +149,8 @@ def test_provider_clients_are_created_without_requests(monkeypatch: pytest.Monke
         def __init__(self, **kwargs: str) -> None:
             calls.append(kwargs)
 
-    monkeypatch.setattr("src.providers.llm.OpenAI", RecordingClient)
-    monkeypatch.setattr("src.providers.embeddings.OpenAI", RecordingClient)
+    monkeypatch.setattr("meminfra.providers.llm.OpenAI", RecordingClient)
+    monkeypatch.setattr("meminfra.providers.embeddings.OpenAI", RecordingClient)
     configure(
         llm_provider="openrouter",
         llm_api_key="llm-test-key",
@@ -161,8 +161,8 @@ def test_provider_clients_are_created_without_requests(monkeypatch: pytest.Monke
         embedding_model="test-embedding-model",
     )
 
-    from src.providers.embeddings import get_embedding_client
-    from src.providers.llm import OPENROUTER_BASE_URL, get_llm_client
+    from meminfra.providers.embeddings import get_embedding_client
+    from meminfra.providers.llm import OPENROUTER_BASE_URL, get_llm_client
 
     get_llm_client()
     get_embedding_client()
@@ -180,10 +180,10 @@ def test_openai_uses_its_default_endpoint_without_a_request(monkeypatch: pytest.
         def __init__(self, **kwargs: str) -> None:
             calls.append(kwargs)
 
-    monkeypatch.setattr("src.providers.llm.OpenAI", RecordingClient)
+    monkeypatch.setattr("meminfra.providers.llm.OpenAI", RecordingClient)
     configure(llm_provider="openai", llm_api_key="llm-test-key")
 
-    from src.providers.llm import get_llm_client
+    from meminfra.providers.llm import get_llm_client
 
     get_llm_client()
 
@@ -197,14 +197,14 @@ def test_custom_llm_base_url_is_used_without_a_request(monkeypatch: pytest.Monke
         def __init__(self, **kwargs: str) -> None:
             calls.append(kwargs)
 
-    monkeypatch.setattr("src.providers.llm.OpenAI", RecordingClient)
+    monkeypatch.setattr("meminfra.providers.llm.OpenAI", RecordingClient)
     configure(
         llm_provider="openai_compatible",
         llm_api_key="llm-test-key",
         llm_base_url="https://llm.example.test/v1",
     )
 
-    from src.providers.llm import get_llm_client
+    from meminfra.providers.llm import get_llm_client
 
     get_llm_client()
 

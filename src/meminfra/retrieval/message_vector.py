@@ -16,9 +16,9 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
 
-from src.config import get_config
-from src.database.models import Conversation, Message, MessageRole, User
-from src.providers import get_embedding_client
+from meminfra.config import get_config
+from meminfra.database.models import Conversation, Message, MessageRole, User
+from meminfra.providers import get_embedding_client
 
 from .errors import (
     IndexDimensionMismatchError,

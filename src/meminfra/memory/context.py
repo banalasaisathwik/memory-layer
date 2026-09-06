@@ -11,9 +11,9 @@ from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from src.config import get_config
-from src.database.models import Conversation, ConversationSummary, Message, User
-from src.retrieval import (
+from meminfra.config import get_config
+from meminfra.database.models import Conversation, ConversationSummary, Message, User
+from meminfra.retrieval import (
     RetrievalError,
     bm25_rank,
     fuse_message_rankings,

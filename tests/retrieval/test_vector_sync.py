@@ -18,10 +18,10 @@ from uuid import uuid4
 
 import pytest
 
-from src.config import configure, reset_config
-from src.database import Memory, MemoryType, SessionLocal, User, create_tables, reset_engine
-from src.retrieval import SearchFilters
-from src.retrieval.vector import (
+from meminfra.config import configure, reset_config
+from meminfra.database import Memory, MemoryType, SessionLocal, User, create_tables, reset_engine
+from meminfra.retrieval import SearchFilters
+from meminfra.retrieval.vector import (
     get_memory_index_sync_stats,
     load_user_memory_index,
     reset_memory_index_sync_stats,
@@ -81,7 +81,7 @@ def fake_embeddings(monkeypatch: pytest.MonkeyPatch, tmp_path) -> FakeEmbeddingC
         faiss_index_dir=tmp_path,
         vector_candidate_multiplier=5,
     )
-    monkeypatch.setattr("src.retrieval.vector.get_embedding_client", lambda: client)
+    monkeypatch.setattr("meminfra.retrieval.vector.get_embedding_client", lambda: client)
     reset_memory_index_sync_stats()
     return client
 

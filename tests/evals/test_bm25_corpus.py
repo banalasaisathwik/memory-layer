@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import pytest
 
 from evals.locomo.bm25_corpus import prepare_bm25_corpus
-from src.retrieval.bm25 import bm25_rank
+from meminfra.retrieval.bm25 import bm25_rank
 
 
 @dataclass(frozen=True)

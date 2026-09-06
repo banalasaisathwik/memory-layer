@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from src.database.models import Memory, Message
+from meminfra.database.models import Memory, Message
 
 
 RRF_K = 60

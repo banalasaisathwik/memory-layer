@@ -18,9 +18,9 @@ from uuid import uuid4
 
 import pytest
 
-from src.config import configure, reset_config
-from src.database import Conversation, Message, MessageRole, SessionLocal, User, create_tables, reset_engine
-from src.retrieval import (
+from meminfra.config import configure, reset_config
+from meminfra.database import Conversation, Message, MessageRole, SessionLocal, User, create_tables, reset_engine
+from meminfra.retrieval import (
     conversation_message_index_paths,
     get_message_index_sync_stats,
     load_conversation_message_index,
@@ -80,7 +80,7 @@ def fake_embeddings(monkeypatch: pytest.MonkeyPatch, tmp_path) -> FakeEmbeddingC
         faiss_index_dir=tmp_path,
         vector_candidate_multiplier=5,
     )
-    monkeypatch.setattr("src.retrieval.message_vector.get_embedding_client", lambda: client)
+    monkeypatch.setattr("meminfra.retrieval.message_vector.get_embedding_client", lambda: client)
     reset_message_index_sync_stats()
     return client
 

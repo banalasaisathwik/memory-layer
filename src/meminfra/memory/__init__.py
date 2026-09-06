@@ -7,7 +7,7 @@ from .predicates import PREDICATE_ALIASES, PREDICATES, get_predicate_cardinality
 from .schemas import CandidateMemory
 from .summaries import SummaryError, update_conversation_summary
 from .writer import WriteAction, WriteConflictError, WriteError, WriteResult, write_memories
-from src.retrieval import retrieve_semantic_message_context
+from meminfra.retrieval import retrieve_semantic_message_context
 
 __all__ = [
     "CandidateMemory",

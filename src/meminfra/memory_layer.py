@@ -6,7 +6,7 @@ one step at a time. :class:`MemoryLayer` orchestrates those existing
 production functions behind three methods: :meth:`MemoryLayer.add`,
 :meth:`MemoryLayer.search`, and :meth:`MemoryLayer.answer`. It introduces no
 new memory-quality behavior: ranking, deduplication, and write semantics are
-unchanged from the underlying ``src.memory`` / ``src.retrieval`` modules.
+unchanged from the underlying ``meminfra.memory`` / ``meminfra.retrieval`` modules.
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ from pydantic import Field, TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.config import get_config
-from src.database.models import Conversation, Message, MessageRole, User, utcnow
-from src.memory import (
+from meminfra.config import get_config
+from meminfra.database.models import Conversation, Message, MessageRole, User, utcnow
+from meminfra.memory import (
     SummaryError,
     WriteResult,
     build_extraction_context,
@@ -30,10 +30,10 @@ from src.memory import (
     update_conversation_summary,
     write_memories,
 )
-from src.memory.context import ChatMessage
-from src.memory.prompts import ANSWER_READER_SYSTEM_PROMPT
-from src.providers import get_llm_client
-from src.retrieval import SearchFilters, SearchHit, search_memories
+from meminfra.memory.context import ChatMessage
+from meminfra.memory.prompts import ANSWER_READER_SYSTEM_PROMPT
+from meminfra.providers import get_llm_client
+from meminfra.retrieval import SearchFilters, SearchHit, search_memories
 
 
 class MemoryLayerError(Exception):

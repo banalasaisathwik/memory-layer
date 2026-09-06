@@ -1,6 +1,6 @@
 """A BM25 corpus prepared once per benchmark run (eval-only, Part C).
 
-``src.retrieval.bm25.bm25_rank`` deliberately recomputes tokenization, document
+``meminfra.retrieval.bm25.bm25_rank`` deliberately recomputes tokenization, document
 lengths, avgdl, and per-query document frequencies/IDF on every call -- exactly
 right for production, where the scoped corpus can change between searches.
 For a frozen LoCoMo benchmark run the corpus is the same set of active
@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from math import log
 from typing import Callable, Generic, Protocol, TypeVar
 
-from src.retrieval.bm25 import BM25_B, BM25_K1, BM25Hit, tokenize
+from meminfra.retrieval.bm25 import BM25_B, BM25_K1, BM25Hit, tokenize
 
 
 class _HasId(Protocol):

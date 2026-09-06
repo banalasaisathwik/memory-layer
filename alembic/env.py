@@ -7,9 +7,9 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from src.config import get_migration_database_url
-from src.database.connection import _sqlalchemy_url
-from src.database.models import Base
+from meminfra.config import get_migration_database_url
+from meminfra.database.connection import _sqlalchemy_url
+from meminfra.database.models import Base
 
 
 config = context.config

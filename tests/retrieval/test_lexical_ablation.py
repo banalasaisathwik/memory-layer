@@ -16,10 +16,10 @@ from uuid import uuid4
 
 import pytest
 
-from src.config import configure, reset_config
-from src.database import Conversation, Memory, MemoryType, SessionLocal, User, create_tables, reset_engine
-from src.retrieval import SearchFilters, bm25_retrieve, lexical_retrieve
-from src.retrieval.search import search_memories
+from meminfra.config import configure, reset_config
+from meminfra.database import Conversation, Memory, MemoryType, SessionLocal, User, create_tables, reset_engine
+from meminfra.retrieval import SearchFilters, bm25_retrieve, lexical_retrieve
+from meminfra.retrieval.search import search_memories
 
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
@@ -210,7 +210,7 @@ def _deterministic_vector(text: str, *, dimension: int = 8):
 def deterministic_embeddings(monkeypatch):
     """Replace the real embedding provider with a deterministic, offline stand-in.
 
-    Patches ``src.retrieval.vector._embedding_response_vectors`` -- the single
+    Patches ``meminfra.retrieval.vector._embedding_response_vectors`` -- the single
     choke point both ``vector_retrieve`` (used by production ``search_memories``)
     and this ablation's shared vector branch call through -- so both sides of
     every parity comparison see identical embeddings with no network call.
@@ -218,7 +218,7 @@ def deterministic_embeddings(monkeypatch):
 
     import numpy as np
 
-    import src.retrieval.vector as vector_module
+    import meminfra.retrieval.vector as vector_module
 
     def fake_embedding_response_vectors(texts: list[str]) -> list["np.ndarray"]:
         return [_deterministic_vector(text) / np.linalg.norm(_deterministic_vector(text)) for text in texts]
@@ -242,7 +242,7 @@ def _shared_benchmark_state(db, *, user):
     from evals.locomo.bm25_corpus import prepare_bm25_corpus
     from sqlalchemy import select as sa_select
 
-    from src.database.models import Memory as MemoryModel
+    from meminfra.database.models import Memory as MemoryModel
 
     active_memories = list(
         db.scalars(

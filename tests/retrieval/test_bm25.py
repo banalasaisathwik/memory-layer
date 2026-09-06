@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from src.retrieval import BM25_B, BM25_K1, bm25_rank, tokenize
+from meminfra.retrieval import BM25_B, BM25_K1, bm25_rank, tokenize
 
 
 @dataclass(frozen=True)

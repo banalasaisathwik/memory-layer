@@ -18,8 +18,8 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.database.models import Memory, User
-from src.memory_layer import MemoryLayer
+from meminfra.database.models import Memory, User
+from meminfra.memory_layer import MemoryLayer
 
 from .metrics import aggregate_retrieval_metrics, evaluate_question_retrieval, group_retrieval_by_category
 from .recover import build_dia_id_mapping, session_message_slices
@@ -98,7 +98,7 @@ def rerun_retrieval(
     not, rather than silently ingesting anything.
     """
 
-    from src.database.models import Conversation
+    from meminfra.database.models import Conversation
 
     user = db.scalar(select(User).where(User.external_id == user_id))
     if user is None:
@@ -208,8 +208,8 @@ def main(argv: list[str] | None = None) -> int:
     import subprocess
     from uuid import uuid4
 
-    from src.config import configure, get_config, reset_config
-    from src.database import SessionLocal, create_tables, reset_engine
+    from meminfra.config import configure, get_config, reset_config
+    from meminfra.database import SessionLocal, create_tables, reset_engine
 
     from ..db import EvalDatabaseConfigError, get_eval_database_url, print_eval_database_banner
     from .dataset import DEFAULT_DATASET_PATH, dataset_sha256, load_locomo_dataset

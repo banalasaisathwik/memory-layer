@@ -19,8 +19,8 @@ import openai
 import pytest
 from sqlalchemy import select
 
-from src.config import configure, reset_config
-from src.database import Memory, Message, SessionLocal, create_tables, reset_engine
+from meminfra.config import configure, reset_config
+from meminfra.database import Memory, Message, SessionLocal, create_tables, reset_engine
 from evals.locomo.ingest import ingest_sample
 from evals.locomo.recover import (
     _classify_extraction_error,
@@ -28,7 +28,7 @@ from evals.locomo.recover import (
     recover_sessions,
 )
 from evals.locomo.schemas import LocomoSample, LocomoTurn
-from src.memory import ExtractionError
+from meminfra.memory import ExtractionError
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = [
@@ -125,9 +125,9 @@ def db():
 
 
 def _patch_providers(monkeypatch: pytest.MonkeyPatch, completions: ScriptedCompletions, *, tmp_path) -> None:
-    monkeypatch.setattr("src.memory.extractor.get_llm_client", lambda: FakeLLMClient(completions))
-    monkeypatch.setattr("src.retrieval.vector.get_embedding_client", lambda: FakeEmbeddingClient())
-    monkeypatch.setattr("src.retrieval.message_vector.get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr("meminfra.memory.extractor.get_llm_client", lambda: FakeLLMClient(completions))
+    monkeypatch.setattr("meminfra.retrieval.vector.get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr("meminfra.retrieval.message_vector.get_embedding_client", lambda: FakeEmbeddingClient())
     configure(faiss_index_dir=tmp_path, embedding_model="fake-model")
 
 

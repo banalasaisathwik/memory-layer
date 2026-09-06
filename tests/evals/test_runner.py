@@ -15,8 +15,8 @@ from typing import Any
 
 import pytest
 
-from src.config import configure, reset_config
-from src.database import SessionLocal, create_tables, reset_engine
+from meminfra.config import configure, reset_config
+from meminfra.database import SessionLocal, create_tables, reset_engine
 from evals.runner import run_case
 from evals.schemas import EvalCase, EvalMessage, ExpectedMemory
 
@@ -100,8 +100,8 @@ def configured_test_database() -> None:
 @pytest.fixture
 def fake_providers(monkeypatch: pytest.MonkeyPatch, tmp_path) -> FakeCompletions:
     completions = FakeCompletions()
-    monkeypatch.setattr("src.memory.extractor.get_llm_client", lambda: FakeLLMClient(completions))
-    monkeypatch.setattr("src.retrieval.vector.get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr("meminfra.memory.extractor.get_llm_client", lambda: FakeLLMClient(completions))
+    monkeypatch.setattr("meminfra.retrieval.vector.get_embedding_client", lambda: FakeEmbeddingClient())
     configure(faiss_index_dir=tmp_path)
     return completions
 

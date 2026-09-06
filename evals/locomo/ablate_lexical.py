@@ -12,7 +12,7 @@ This module never calls ``MemoryLayer.add()``, never ingests a LoCoMo sample,
 never calls ``extract_memories()``/``write_memories()``, and never inserts a
 ``User``/``Conversation``/``Message``/``Memory`` row. It only reads existing
 rows and calls the same lower-level retrieval branch functions that
-``src.retrieval.search.search_memories()`` composes internally (structured,
+``meminfra.retrieval.search.search_memories()`` composes internally (structured,
 lexical/BM25, vector, RRF), never a second, diverging implementation of
 production retrieval semantics.
 
@@ -51,17 +51,17 @@ import numpy as np
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from src.config import get_config
-from src.database.models import Conversation, Memory, Message, User
-from src.providers import get_embedding_client
-from src.retrieval.errors import IndexDimensionMismatchError
-from src.retrieval.fusion import RRF_K, reciprocal_rank_fusion
-from src.retrieval.lexical import lexical_retrieve
-from src.retrieval.schemas import SearchFilters
-from src.retrieval.search import _BRANCH_CANDIDATE_MULTIPLIER, _MAX_SEARCH_LIMIT, LexicalBackend, search_memories
-from src.retrieval.structured import memory_filter_conditions, structured_retrieve
-from src.retrieval.vector import _ensure_user_memory_index
-from src.retrieval.vector_support import embedding_response_vectors
+from meminfra.config import get_config
+from meminfra.database.models import Conversation, Memory, Message, User
+from meminfra.providers import get_embedding_client
+from meminfra.retrieval.errors import IndexDimensionMismatchError
+from meminfra.retrieval.fusion import RRF_K, reciprocal_rank_fusion
+from meminfra.retrieval.lexical import lexical_retrieve
+from meminfra.retrieval.schemas import SearchFilters
+from meminfra.retrieval.search import _BRANCH_CANDIDATE_MULTIPLIER, _MAX_SEARCH_LIMIT, LexicalBackend, search_memories
+from meminfra.retrieval.structured import memory_filter_conditions, structured_retrieve
+from meminfra.retrieval.vector import _ensure_user_memory_index
+from meminfra.retrieval.vector_support import embedding_response_vectors
 
 from .ablation_checkpoint import (
     AblationCheckpoint,
@@ -91,7 +91,7 @@ BACKEND_LABEL = {"postgres_fts": "Postgres FTS", "bm25": "BM25"}
 STAGE_KEYS = ("SUCCESS", "NO_GOLD_MEMORY", "RETRIEVAL_MISS", "RANKING_MISS")
 
 # _BRANCH_CANDIDATE_MULTIPLIER / _MAX_SEARCH_LIMIT (imported above) mirror
-# src.retrieval.search's private branch-sizing constants exactly, so the
+# meminfra.retrieval.search's private branch-sizing constants exactly, so the
 # shared candidate lists this module builds have the identical shape
 # search_memories() would produce -- imported by name, never re-declared,
 # so the two can never silently drift.
@@ -165,7 +165,7 @@ def _vector_candidates_from_embedding(
 ) -> list[Memory]:
     """Reproduce ``vector_retrieve``'s post-embedding FAISS + DB-filter logic exactly.
 
-    ``src.retrieval.vector.vector_retrieve`` always computes its own query
+    ``meminfra.retrieval.vector.vector_retrieve`` always computes its own query
     embedding internally, so it cannot be handed a cached vector directly.
     This function duplicates only its logic *after* the embedding step
     (calling the same private ``_ensure_user_memory_index`` production sync
@@ -839,8 +839,8 @@ def main(argv: list[str] | None = None) -> int:
     import subprocess
     from uuid import uuid4
 
-    from src.config import configure, get_config, reset_config
-    from src.database import SessionLocal, create_tables, reset_engine
+    from meminfra.config import configure, get_config, reset_config
+    from meminfra.database import SessionLocal, create_tables, reset_engine
 
     from ..db import EvalDatabaseConfigError, get_eval_database_url, print_eval_database_banner
     from .dataset import DEFAULT_DATASET_PATH, dataset_sha256, load_locomo_dataset
