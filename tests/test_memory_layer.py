@@ -546,6 +546,35 @@ def test_answer_grounds_its_response_in_retrieved_memories(db, fake_extraction, 
     assert len(fake_answer.calls) == 1
 
 
+def test_answer_extracts_query_intent_once_through_search(db, fake_extraction, fake_answer, monkeypatch) -> None:
+    user_id = _unique("user")
+    conversation_id = _unique("conv")
+    fake_extraction.content = _extraction_payload(memory_text="User lives in Delhi.", predicate="location", value="Delhi")
+    fake_answer.content = "The user lives in Delhi."
+    calls = 0
+
+    from meminfra.retrieval import QueryIntent
+
+    def intent_once(query: str) -> QueryIntent:
+        nonlocal calls
+        calls += 1
+        return QueryIntent(predicate="location")
+
+    monkeypatch.setattr("meminfra.retrieval.search.extract_query_intent", intent_once)
+    memory = MemoryLayer(db)
+    memory.add(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        messages=[{"role": "user", "content": "I live in Delhi."}],
+    )
+
+    result = memory.answer(user_id=user_id, query="Where do I live?")
+
+    assert result.answer == "The user lives in Delhi."
+    assert calls == 1
+    assert len(fake_answer.calls) == 1
+
+
 def test_answer_abstains_without_an_llm_call_when_no_memories_exist(db, fake_extraction, fake_answer) -> None:
     user_id = _unique("user")
     conversation_id = _unique("conv")

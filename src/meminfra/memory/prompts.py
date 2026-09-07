@@ -2,6 +2,41 @@
 
 from __future__ import annotations
 
+from .predicates import render_controlled_predicate_guidance
+
+
+def build_query_intent_system_prompt() -> str:
+    """Build the query-understanding prompt from the canonical predicate registry."""
+
+    return """You translate one natural-language memory query into optional structured retrieval hints.
+
+""" + render_controlled_predicate_guidance() + """
+
+When the query clearly asks about a controlled predicate, use its exact canonical name. Do not invent synonyms such as "current_city", "residence", or "db_preference". If no controlled predicate clearly applies, return null for predicate.
+
+The optional value is only a value the query is trying to match. Do not mistake a temporal or reference anchor for the requested value: in "Where did I live before Delhi?", Delhi is not a value to match.
+
+temporal_scope concerns the lifecycle of a structured fact only:
+- "current": active/current fact value.
+- "historical": superseded structured facts.
+- "any": active and historical structured facts.
+Do not infer "historical" merely because a query mentions a date or a past event. For example, an episodic query about "yesterday" has no structured predicate and uses "current".
+
+Return exactly one JSON object with no markdown or surrounding prose:
+{
+  "predicate": "canonical_predicate" | null,
+  "value": "specific value to match" | null,
+  "temporal_scope": "current" | "historical" | "any"
+}
+
+Examples:
+- "Where do I live?" -> {"predicate": "location", "value": null, "temporal_scope": "current"}
+- "What database do I prefer?" -> {"predicate": "database_preference", "value": null, "temporal_scope": "current"}
+- "Do I know Python?" -> {"predicate": "programming_language", "value": "Python", "temporal_scope": "current"}
+- "Where did I live before Delhi?" -> {"predicate": "location", "value": null, "temporal_scope": "historical"}
+- "What was I debugging yesterday?" -> {"predicate": null, "value": null, "temporal_scope": "current"}
+"""
+
 
 EXTRACTION_SYSTEM_PROMPT = """You extract long-term memory candidates from one designated, current chat interaction.
 
@@ -21,6 +56,12 @@ Keep only information likely to be useful in later interactions:
 - episodic memories: time-bound events, tasks, or states that may still be useful later.
 
 Do not extract greetings, filler, generic world knowledge, passwords, API keys, credentials, secrets, temporary wording with no likely future value, or facts supported only by the assistant. Preserve uncertainty: a plan or possibility must not become a certain stable fact.
+
+""" + render_controlled_predicate_guidance() + """
+
+When a candidate's meaning matches a controlled predicate, use that canonical predicate name exactly. Do not invent a synonym for a controlled concept: for example, use "location", not "current_city", "residence", or "lives_in". Unknown predicate names remain allowed only when no controlled predicate accurately represents the memory.
+
+For a durable fact that the current user states in first person, use subject_type "user" when appropriate. Do not force project facts to the user.
 
 Return exactly one JSON object and no markdown or surrounding prose. It must have this shape:
 {
@@ -42,6 +83,9 @@ Use confidence for confidence that the user expressed the memory, and importance
 
 Examples:
 - User: "I prefer PostgreSQL over MySQL." -> one semantic memory with predicate "database_preference" and value "PostgreSQL".
+- User: "I live in Hyderabad." -> one semantic memory with subject_type "user", predicate "location", and value "Hyderabad".
+- User: "I now live in Delhi." -> one semantic memory with subject_type "user", predicate "location", and value "Delhi".
+- User: "I'm visiting Mumbai for two days." -> an episodic memory or no memory; do not use the durable "location" predicate.
 - User: "I'm debugging an authentication issue today." -> one episodic memory; predicate and value may be null.
 - User: "Thanks!" -> {"memories": []}.
 - Assistant: "Maybe you prefer PostgreSQL?" -> {"memories": []} unless the user separately confirms it.

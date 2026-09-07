@@ -122,6 +122,24 @@ def test_valid_semantic_memory_parses_and_attaches_provenance(fake_completions: 
     }
 
 
+def test_extraction_prompt_renders_controlled_predicates_and_location_guidance(
+    fake_completions: FakeCompletions,
+) -> None:
+    _extract(fake_completions, {"memories": []})
+    sent_system_prompt = fake_completions.calls[0]["messages"][0]["content"]
+
+    assert sent_system_prompt == EXTRACTION_SYSTEM_PROMPT
+    for predicate in ("location", "database_preference", "programming_language"):
+        assert f"- {predicate}:" in sent_system_prompt
+
+    assert "use that canonical predicate name exactly" in sent_system_prompt
+    assert 'subject_type "user"' in sent_system_prompt
+    assert '"I live in Hyderabad."' in sent_system_prompt
+    assert '"I now live in Delhi."' in sent_system_prompt
+    assert '"I\'m visiting Mumbai for two days."' in sent_system_prompt
+    assert 'do not use the durable "location" predicate' in sent_system_prompt
+
+
 def test_context_is_labeled_separately_from_target_and_keeps_target_only_provenance(
     fake_completions: FakeCompletions,
 ) -> None:

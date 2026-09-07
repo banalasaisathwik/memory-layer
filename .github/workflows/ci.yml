@@ -99,7 +99,7 @@ jobs:
         run: |
           "$RUNNER_TEMP/meminfra-wheel/bin/python" -c "from meminfra import MemoryLayer; print(MemoryLayer)"
           "$RUNNER_TEMP/meminfra-wheel/bin/python" -c "import meminfra.database, meminfra.memory, meminfra.retrieval"
-          "$RUNNER_TEMP/meminfra-wheel/bin/python" -c "from importlib.metadata import metadata, version; assert version('meminfra') == '0.1.0'; assert metadata('meminfra')['Name'] == 'meminfra'"
+          "$RUNNER_TEMP/meminfra-wheel/bin/python" -c "from importlib.metadata import metadata, version; assert version('meminfra') == '0.2.0'; assert metadata('meminfra')['Name'] == 'meminfra'"
           "$RUNNER_TEMP/meminfra-wheel/bin/python" -m pip check
           "$RUNNER_TEMP/meminfra-wheel/bin/meminfra" --help
       - name: Migrate disposable database from installed wheel

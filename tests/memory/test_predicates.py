@@ -15,6 +15,19 @@ def test_explicit_alias_resolves_to_canonical_predicate() -> None:
     assert get_predicate_cardinality("db_preference") == "single"
 
 
+def test_location_aliases_resolve_to_the_canonical_predicate() -> None:
+    aliases = {
+        "current_location",
+        "current_city",
+        "residence",
+        "home_location",
+        "lives_in",
+    }
+
+    assert {resolve_predicate(alias) for alias in aliases} == {"location"}
+    assert {get_predicate_cardinality(alias) for alias in aliases} == {"single"}
+
+
 def test_predicate_formatting_normalizes() -> None:
     assert resolve_predicate(" Database-Preference ") == "database_preference"
     assert resolve_predicate("DATABASE_PREFERENCE") == "database_preference"

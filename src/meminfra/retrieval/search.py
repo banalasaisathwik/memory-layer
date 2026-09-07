@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from sqlalchemy import select
@@ -12,8 +13,9 @@ from meminfra.database.models import Conversation, User
 from .errors import InvalidFilterScopeError, InvalidSearchError, UserNotFoundError
 from .fusion import DEFAULT_AGREEMENT_DISCOUNT, FusionStrategy, fuse_rankings
 from .lexical import bm25_retrieve, lexical_retrieve
+from .query_intent import QueryIntentError, extract_query_intent
 from .schemas import SearchFilters, SearchHit
-from .structured import structured_retrieve
+from .structured import structured_retrieve, structured_retrieve_from_intent
 from .vector import vector_retrieve
 
 
@@ -21,6 +23,20 @@ _MAX_SEARCH_LIMIT = 100
 _BRANCH_CANDIDATE_MULTIPLIER = 5
 
 LexicalBackend = Literal["bm25", "postgres_fts"]
+logger = logging.getLogger(__name__)
+
+
+def _merge_structured_candidates(*rankings: list) -> list:
+    """Preserve one meaningful structured rank when branches overlap."""
+
+    seen: set[object] = set()
+    merged: list = []
+    for ranking in rankings:
+        for memory in ranking:
+            if memory.id not in seen:
+                seen.add(memory.id)
+                merged.append(memory)
+    return merged
 
 
 def _resolve_user(db: Session, user_external_id: str) -> User:
@@ -62,8 +78,9 @@ def search_memories(
     filters: SearchFilters | None = None,
     lexical_backend: LexicalBackend = "bm25",
     fusion_strategy: FusionStrategy = "discounted_agreement",
+    infer_query_intent: bool = True,
 ) -> list[SearchHit]:
-    """Search one user's active memories with structured, lexical, and FAISS branches.
+    """Search one user's memories with structured, lexical, and FAISS branches.
 
     ``lexical_backend`` selects the lexical branch: ``"bm25"`` (the default
     production behavior, genuine Okapi BM25 scoring) or ``"postgres_fts"``
@@ -72,9 +89,7 @@ def search_memories(
 
     ``fusion_strategy`` selects how the structured, lexical, and vector
     branches are combined into one final ranking. The default,
-    ``"discounted_agreement"``, is the project's current validated default
-    (a conv-30 LoCoMo ablation showed +3 net question-level gain over equal
-    RRF at ``agreement_discount=0.10``): it scores each candidate as its
+    ``"discounted_agreement"``, is the project's current default. It scores each candidate as its
     strongest branch's reciprocal rank plus a discounted bonus for any
     additional branches that also matched, so one excellent single-branch
     match is no longer routinely outranked by two only-mediocre branch
@@ -96,13 +111,30 @@ def search_memories(
     conversation = _resolve_filter_conversation(db, user=user, filters=active_filters)
     branch_limit = min(_MAX_SEARCH_LIMIT, limit * _BRANCH_CANDIDATE_MULTIPLIER)
 
-    structured = structured_retrieve(
+    explicit_structured = structured_retrieve(
         db,
         user=user,
         filters=active_filters,
         conversation=conversation,
         limit=branch_limit,
     )
+    intent_structured = []
+    if infer_query_intent:
+        try:
+            intent = extract_query_intent(query)
+            intent_structured = structured_retrieve_from_intent(
+                db,
+                user=user,
+                intent=intent,
+                filters=active_filters,
+                conversation=conversation,
+                limit=branch_limit,
+            )
+        except QueryIntentError as error:
+            logger.warning("query intent unavailable; continuing without its structured branch (%s)", error.category)
+    # Intent results lead because they are query-specific evidence. Explicit
+    # filters remain in every SQL condition, and duplicates get one rank only.
+    structured = _merge_structured_candidates(intent_structured, explicit_structured)[:branch_limit]
     lexical_retrieve_fn = bm25_retrieve if lexical_backend == "bm25" else lexical_retrieve
     lexical = lexical_retrieve_fn(
         db,

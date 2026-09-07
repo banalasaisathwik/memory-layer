@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -29,8 +30,25 @@ class SearchFilters(BaseModel):
         return value
 
 
+class QueryIntent(BaseModel):
+    """Optional LLM-derived hints for the structured retrieval branch only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    predicate: str | None = None
+    value: str | None = None
+    temporal_scope: Literal["current", "historical", "any"] = "current"
+
+    @field_validator("predicate", "value")
+    @classmethod
+    def reject_blank_intent_values(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("Query intent values must not be empty or whitespace-only.")
+        return value
+
+
 class SearchHit(BaseModel):
-    """A durable-memory result with inspectable branch ranks and RRF score."""
+    """A durable-memory result with inspectable branch ranks and fused score."""
 
     model_config = ConfigDict(extra="forbid")
 

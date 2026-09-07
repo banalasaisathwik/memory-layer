@@ -31,6 +31,12 @@ def test_single_valued_location_values_have_the_same_key() -> None:
     )
 
 
+def test_location_alias_uses_the_canonical_fact_key() -> None:
+    candidate = _semantic_candidate(predicate="current_city")
+
+    assert build_fact_key(candidate, subject_id="user_123") == "user:user_123:location"
+
+
 def test_multi_valued_fact_keys_differ_by_value_identity() -> None:
     python = _semantic_candidate(predicate="programming_language", value="Python")
     go = _semantic_candidate(predicate="programming_language", value="Go")

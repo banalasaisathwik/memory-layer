@@ -254,12 +254,24 @@ def test_equivalent_structured_value_is_a_noop_and_merges_provenance(db) -> None
 
     first = write_memories(
         db,
-        [_candidate(source_message_ids=[str(first_message.id)])],
+        [
+            _candidate(
+                memory_text="User lives in Hyderabad",
+                value="Hyderabad",
+                source_message_ids=[str(first_message.id)],
+            )
+        ],
         user_external_id=user.external_id,
     )[0]
     repeated = write_memories(
         db,
-        [_candidate(value="  bangalore  ", source_message_ids=[str(second_message.id)])],
+        [
+            _candidate(
+                memory_text="User lives in Hyderabad",
+                value="  hyderabad  ",
+                source_message_ids=[str(second_message.id)],
+            )
+        ],
         user_external_id=user.external_id,
     )[0]
 
@@ -275,18 +287,65 @@ def test_changed_single_value_supersedes_without_deleting_history(db) -> None:
     user = _user(db)
     first = write_memories(db, [_candidate(value="Hyderabad")], user_external_id=user.external_id)[0]
 
-    result = write_memories(db, [_candidate(value="Bangalore")], user_external_id=user.external_id)[0]
+    result = write_memories(db, [_candidate(value="Delhi")], user_external_id=user.external_id)[0]
 
     old_memory = db.get(Memory, first.memory_id)
     new_memory = db.get(Memory, result.memory_id)
+    active_locations = list(
+        db.scalars(
+            select(Memory).where(
+                Memory.user_id == user.id,
+                Memory.fact_key == f"user:{user.external_id}:location",
+                Memory.is_active.is_(True),
+            )
+        )
+    )
     assert result.action is WriteAction.SUPERSEDE
     assert result.superseded_memory_id == first.memory_id
     assert old_memory is not None and new_memory is not None
     assert old_memory.is_active is False
+    assert old_memory.value == "Hyderabad"
     assert old_memory.valid_to == new_memory.valid_from
     assert old_memory.superseded_by_id == new_memory.id
     assert new_memory.is_active is True
+    assert new_memory.value == "Delhi"
+    assert active_locations == [new_memory]
     assert _memory_count(db, user) == 2
+
+
+def test_location_alias_change_supersedes_the_canonical_location_fact(db) -> None:
+    user = _user(db)
+    first = write_memories(
+        db,
+        [
+            _candidate(
+                memory_text="User lives in Hyderabad",
+                predicate="current_city",
+                value="Hyderabad",
+            )
+        ],
+        user_external_id=user.external_id,
+    )[0]
+
+    second = write_memories(
+        db,
+        [
+            _candidate(
+                memory_text="User lives in Delhi",
+                predicate="location",
+                value="Delhi",
+            )
+        ],
+        user_external_id=user.external_id,
+    )[0]
+
+    old_memory = db.get(Memory, first.memory_id)
+    new_memory = db.get(Memory, second.memory_id)
+    assert first.action is WriteAction.ADD
+    assert second.action is WriteAction.SUPERSEDE
+    assert second.fact_key == f"user:{user.external_id}:location"
+    assert old_memory is not None and old_memory.is_active is False
+    assert new_memory is not None and new_memory.is_active is True
 
 
 def test_multi_valued_facts_coexist_and_repeat_is_a_noop(db) -> None:

@@ -16,6 +16,8 @@ from meminfra.retrieval import (
     IndexDimensionMismatchError,
     InvalidFilterScopeError,
     InvalidSearchError,
+    QueryIntent,
+    QueryIntentError,
     SearchFilters,
     UserNotFoundError,
     load_user_memory_index,
@@ -498,3 +500,227 @@ def test_database_exposes_embedding_columns_and_functional_fts_index() -> None:
 
     assert {"embedding", "embedding_model"} <= columns
     assert "ix_memories_memory_text_fts" in indexes
+
+
+def _intent(*, predicate: str | None, value: str | None = None, temporal_scope: str = "current") -> QueryIntent:
+    return QueryIntent(predicate=predicate, value=value, temporal_scope=temporal_scope)
+
+
+def test_natural_location_query_gets_structured_evidence(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    delhi = _memory(db, user, "User lives in Delhi", predicate="location", value="Delhi")
+    monkeypatch.setattr("meminfra.retrieval.search.extract_query_intent", lambda query: _intent(predicate="location"))
+
+    hits = search_memories(db, "Where do I live?", user_external_id=user.external_id)
+
+    assert hits[0].memory_id == str(delhi.id)
+    assert hits[0].structured_rank == 1
+
+
+def test_database_preference_query_gets_structured_evidence(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    preference = _memory(db, user, "User prefers PostgreSQL", predicate="database_preference", value="PostgreSQL")
+    monkeypatch.setattr(
+        "meminfra.retrieval.search.extract_query_intent",
+        lambda query: _intent(predicate="database_preference"),
+    )
+
+    hits = search_memories(db, "What database do I prefer?", user_external_id=user.external_id)
+
+    assert hits[0].memory_id == str(preference.id)
+    assert hits[0].structured_rank == 1
+
+
+def test_exact_query_value_ranks_matching_multi_value_fact_first(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    python = _memory(db, user, "User knows Python", predicate="programming_language", value="Python")
+    go = _memory(db, user, "User knows Go", predicate="programming_language", value="Go")
+    monkeypatch.setattr(
+        "meminfra.retrieval.search.extract_query_intent",
+        lambda query: _intent(predicate="programming_language", value=" python "),
+    )
+
+    hits = search_memories(db, "Do I know Python?", user_external_id=user.external_id)
+    by_id = {hit.memory_id: hit for hit in hits}
+
+    assert hits[0].memory_id == str(python.id)
+    assert by_id[str(python.id)].structured_rank == 1
+    assert by_id[str(go.id)].structured_rank is None
+
+
+def test_historical_intent_returns_superseded_structured_fact(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    hyderabad = _memory(db, user, "User lived in Hyderabad", predicate="location", value="Hyderabad", is_active=False)
+    delhi = _memory(db, user, "User lives in Delhi", predicate="location", value="Delhi")
+    monkeypatch.setattr(
+        "meminfra.retrieval.search.extract_query_intent",
+        lambda query: _intent(predicate="location", temporal_scope="historical"),
+    )
+
+    hits = search_memories(db, "Where did I live before Delhi?", user_external_id=user.external_id)
+    by_id = {hit.memory_id: hit for hit in hits}
+
+    assert by_id[str(hyderabad.id)].structured_rank == 1
+    assert str(delhi.id) not in by_id or by_id[str(delhi.id)].structured_rank is None
+
+
+def test_wrong_intent_does_not_filter_bm25_or_vector(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    relevant = _memory(db, user, "Gina opened an online clothing store.")
+    monkeypatch.setattr(
+        "meminfra.retrieval.search.extract_query_intent",
+        lambda query: _intent(predicate="database_preference"),
+    )
+
+    hits = search_memories(db, "What clothing business does Gina run?", user_external_id=user.external_id)
+
+    hit = next(hit for hit in hits if hit.memory_id == str(relevant.id))
+    assert hit.lexical_rank == 1
+    assert hit.structured_rank is None
+
+
+def test_query_intent_failure_falls_back_to_existing_branches(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    relevant = _memory(db, user, "Gina opened an online clothing store.")
+
+    def fail(query: str) -> QueryIntent:
+        raise QueryIntentError("provider unavailable", category="provider")
+
+    monkeypatch.setattr("meminfra.retrieval.search.extract_query_intent", fail)
+    hits = search_memories(db, "What clothing business does Gina run?", user_external_id=user.external_id)
+
+    assert any(hit.memory_id == str(relevant.id) and hit.lexical_rank == 1 for hit in hits)
+    assert all(hit.structured_rank is None for hit in hits)
+
+
+def test_explicit_filters_constrain_conflicting_intent(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    location = _memory(db, user, "User lives in Delhi", predicate="location", value="Delhi")
+    _memory(db, user, "User prefers PostgreSQL", predicate="database_preference", value="PostgreSQL")
+    monkeypatch.setattr(
+        "meminfra.retrieval.search.extract_query_intent",
+        lambda query: _intent(predicate="database_preference"),
+    )
+
+    hits = search_memories(
+        db,
+        "Where do I live?",
+        user_external_id=user.external_id,
+        filters=SearchFilters(predicate="location"),
+    )
+
+    assert [hit.memory_id for hit in hits] == [str(location.id)]
+
+
+def test_no_structured_intent_leaves_existing_branches_unchanged(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    relevant = _memory(db, user, "Gina opened an online clothing store.")
+    monkeypatch.setattr("meminfra.retrieval.search.extract_query_intent", lambda query: _intent(predicate=None))
+
+    hits = search_memories(db, "What clothing business does Gina run?", user_external_id=user.external_id)
+
+    assert any(hit.memory_id == str(relevant.id) and hit.lexical_rank == 1 for hit in hits)
+    assert all(hit.structured_rank is None for hit in hits)
+
+
+def test_explicit_history_exclusion_constrains_historical_intent(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    _memory(db, user, "User lived in Hyderabad", predicate="location", value="Hyderabad", is_active=False)
+    current = _memory(db, user, "User lives in Delhi", predicate="location", value="Delhi")
+    monkeypatch.setattr(
+        "meminfra.retrieval.search.extract_query_intent",
+        lambda query: _intent(predicate="location", temporal_scope="historical"),
+    )
+
+    hits = search_memories(
+        db,
+        "Where did I live before Delhi?",
+        user_external_id=user.external_id,
+        filters=SearchFilters(include_history=False),
+    )
+
+    assert [hit.memory_id for hit in hits] == [str(current.id)]
+
+
+def test_query_intent_can_be_disabled(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    relevant = _memory(db, user, "Gina opened an online clothing store.")
+
+    def unexpected(query: str) -> QueryIntent:
+        raise AssertionError("query intent must not run")
+
+    monkeypatch.setattr("meminfra.retrieval.search.extract_query_intent", unexpected)
+    hits = search_memories(
+        db,
+        "What clothing business does Gina run?",
+        user_external_id=user.external_id,
+        infer_query_intent=False,
+    )
+
+    assert any(hit.memory_id == str(relevant.id) and hit.lexical_rank == 1 for hit in hits)
+
+
+def test_query_predicate_alias_uses_the_canonical_structured_branch(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    delhi = _memory(db, user, "User lives in Delhi", predicate="location", value="Delhi")
+    monkeypatch.setattr(
+        "meminfra.retrieval.search.extract_query_intent",
+        lambda query: _intent(predicate="current_city"),
+    )
+
+    hits = search_memories(db, "Where do I live?", user_external_id=user.external_id)
+
+    assert hits[0].memory_id == str(delhi.id)
+    assert hits[0].structured_rank == 1
+
+
+def test_unknown_query_predicate_does_not_create_a_structured_branch(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    relevant = _memory(db, user, "Gina opened an online clothing store.")
+    monkeypatch.setattr(
+        "meminfra.retrieval.search.extract_query_intent",
+        lambda query: _intent(predicate="invented_predicate"),
+    )
+
+    hits = search_memories(db, "What clothing business does Gina run?", user_external_id=user.external_id)
+
+    hit = next(hit for hit in hits if hit.memory_id == str(relevant.id))
+    assert hit.lexical_rank == 1
+    assert hit.structured_rank is None
+
+
+def test_any_lifecycle_scope_returns_active_and_historical_facts(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    old = _memory(db, user, "User lived in Hyderabad", predicate="location", value="Hyderabad", is_active=False)
+    current = _memory(db, user, "User lives in Delhi", predicate="location", value="Delhi")
+    monkeypatch.setattr(
+        "meminfra.retrieval.search.extract_query_intent",
+        lambda query: _intent(predicate="location", temporal_scope="any"),
+    )
+
+    hits = search_memories(db, "Where have I lived?", user_external_id=user.external_id)
+    by_id = {hit.memory_id: hit for hit in hits}
+
+    assert by_id[str(current.id)].structured_rank == 1
+    assert by_id[str(old.id)].structured_rank == 2
+
+
+def test_conversation_filter_constrains_conflicting_query_intent(db, fake_embeddings, monkeypatch) -> None:
+    user = _user(db)
+    first = _conversation(db, user)
+    second = _conversation(db, user)
+    expected = _memory(db, user, "User lives in Delhi", conversation=first, predicate="location", value="Delhi")
+    _memory(db, user, "User prefers PostgreSQL", conversation=second, predicate="database_preference", value="PostgreSQL")
+    monkeypatch.setattr(
+        "meminfra.retrieval.search.extract_query_intent",
+        lambda query: _intent(predicate="database_preference"),
+    )
+
+    hits = search_memories(
+        db,
+        "Where do I live?",
+        user_external_id=user.external_id,
+        filters=SearchFilters(conversation_external_id=first.external_id),
+    )
+
+    assert [hit.memory_id for hit in hits] == [str(expected.id)]

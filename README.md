@@ -1,195 +1,189 @@
-# Memory Layer
+# Memory Layer / `meminfra`
 
-A Python library for durable, user-scoped long-term memory in LLM applications.
+Memory Layer is a Python library for durable, user-scoped long-term memory in LLM applications. The GitHub project is [`memory-layer`](https://github.com/banalasaisathwik/memory-layer); the PyPI package and Python import are `meminfra`.
 
-Applications send conversations to Memory Layer. It extracts durable memories, updates existing facts deterministically, stores them in PostgreSQL, and retrieves relevant memory with hybrid search. It is memory infrastructure—not a chatbot, agent framework, hosted API, or full context builder.
+It is memory infrastructure, not a chatbot, agent framework, hosted API, document RAG system, or full context builder.
 
-## Install
-
-The intended PyPI installation for the 0.1.0 release is:
+## Installation
 
 ```bash
 pip install meminfra
 ```
 
-Until the package is published, install from source for development:
+For development from a checkout:
 
 ```bash
-git clone https://github.com/banalasaisathwik/memory-layer.git
-cd memory-layer
-pip install -e .
+pip install -e ".[dev]"
 ```
 
-## Quickstart
-
-Set the required database and provider configuration, then apply the packaged migrations:
+Configure the runtime database and providers, then apply the packaged migrations:
 
 ```bash
 meminfra migrate
 ```
+
+`DATABASE_URL` is the PostgreSQL runtime connection. `DIRECT_URL`, when set, is used by `meminfra migrate`. Configure LLM and embedding providers independently with the `LLM_*` and `EMBEDDING_*` environment variables; never commit credentials.
+
+## Quickstart
 
 ```python
 from meminfra import MemoryLayer
 from meminfra.database import SessionLocal
 
-db = SessionLocal()
-memory = MemoryLayer(db)
+with SessionLocal() as db:
+    memory = MemoryLayer(db)
+    memory.add(
+        user_id="user-123",
+        conversation_id="conversation-1",
+        messages=[
+            {"role": "user", "content": "I prefer PostgreSQL for backend projects."},
+        ],
+    )
 
-memory.add(
-    user_id="user-123",
-    conversation_id="conversation-1",
-    messages=[
-        {
-            "role": "user",
-            "content": "I prefer PostgreSQL for backend projects.",
-        }
-    ],
-)
-
-hits = memory.search(
-    user_id="user-123",
-    query="What database do I prefer?",
-)
+    hits = memory.search(
+        user_id="user-123",
+        query="What database do I prefer?",
+    )
 
 for hit in hits:
     print(hit.memory_text)
 ```
 
-`add()` persists the messages, extracts candidates, writes durable memory, and may update the conversation summary. It creates the user and conversation scope when needed. `search()` returns ranked `SearchHit` records for one user.
+`add()` creates the user and conversation scope when needed. `search()` returns ranked `SearchHit` records for that user. `answer()` is available when an application wants a configured LLM to answer only from retrieved memory.
 
-To generate an answer grounded in retrieved memory:
+## What happens when you add memory
 
-```python
-result = memory.answer(
-    user_id="user-123",
-    query="What database do I prefer?",
-)
-
-print(result.answer)
-```
-
-`answer()` retrieves memory before asking the configured LLM to answer from it. If search finds no memory, it abstains without making an answer-generation call.
-
-## What happens when you add memory?
-
-Memory Layer stores semantic and episodic memories. Structured, single-value semantic facts are updated deterministically; open semantic and episodic memories use conservative duplicate handling. Persisted memories retain source-message provenance.
-
-| Existing state | New statement | Action |
-| --- | --- | --- |
-| No active database preference | “I use PostgreSQL” | ADD |
-| Same active preference | “I use PostgreSQL” | NOOP |
-| Active database preference | “I switched to SQLite” | SUPERSEDE |
-
-`SUPERSEDE` applies when a supported single-value structured fact changes. The prior memory stays stored for history and provenance, but default retrieval returns active memories only.
-
-Durable memory is user-scoped. Raw-message context is conversation-scoped, while durable memory can be retrieved across that user’s conversations.
-
-## Retrieval
-
-Natural-language retrieval combines BM25 lexical search with FAISS vector search, then ranks candidates with discounted agreement fusion:
+The write path is:
 
 ```text
-BM25 + FAISS vector search → discounted agreement fusion → ranked memories
+messages -> memory extractor -> controlled predicate canonicalization where applicable
+-> deterministic validation -> ADD / NOOP / SUPERSEDE -> PostgreSQL durable state
+-> FAISS derived vector state
 ```
 
-The default fusion strategy rewards agreement while allowing a strong result from one branch to remain competitive. Equal reciprocal-rank fusion (RRF) remains available for compatibility and ablation, but is not the default. When you supply structured filters, exact structured lookup is used as an additional retrieval branch; it is not inferred from every query.
+Controlled predicates give supported single-value facts deterministic identity and lifecycle behavior. For example, an active location can be added, repeated as a `NOOP`, or superseded by a newer durable location. Unknown or open-world facts remain valid semantic memory; they are not forced into the controlled ontology, and not every memory has a predicate.
 
-PostgreSQL is the durable source of truth for memories and embeddings. Local FAISS indexes are derived retrieval state and rebuild from PostgreSQL when missing, stale, or corrupt.
+`SUPERSEDE` keeps the earlier memory for history and provenance while default retrieval returns active memories. Raw-message context is conversation-scoped; durable memory is user-scoped and can be retrieved across that user's conversations.
 
-## Benchmark
+## What happens when you search
 
-Frozen internal LoCoMo results for `conv-30`:
+The read path is:
 
-| Metric | Baseline | Current |
+```text
+natural-language query -> QueryIntent
+                         -> structured retrieval
+                       + BM25 lexical retrieval
+                       + FAISS vector retrieval
+                         -> discounted-agreement fusion -> ranked SearchHit[]
+```
+
+The three retrieval branches preserve the original natural-language query for BM25 and FAISS. The production fusion is discounted agreement with `lambda = 0.10`: a strong rank in one branch remains competitive, while agreement across branches receives a discounted bonus. Equal reciprocal-rank fusion is retained for compatibility and ablation, not as the default.
+
+## Memory lifecycle
+
+| Existing state | New statement | Result |
+| --- | --- | --- |
+| No active database preference | "I use PostgreSQL" | `ADD` |
+| Same active preference | "I use PostgreSQL" | `NOOP` |
+| Active database preference | "I switched to SQLite" | `SUPERSEDE` |
+
+Lifecycle rules apply only where deterministic structured identity is supported. Open semantic and episodic memories retain conservative duplicate handling and provenance.
+
+## Structured, lexical, and vector retrieval
+
+Structured retrieval can provide exact, lifecycle-aware evidence. BM25 contributes lexical matches, and FAISS contributes semantic vector matches. Their ranks, rather than incomparable raw scores, are fused into each `SearchHit`.
+
+PostgreSQL is the durable source of truth for memories, embeddings, temporal state, and provenance. Per-user FAISS indexes are rebuildable derived state; PostgreSQL resolves and state-filters vector candidates before they become results.
+
+## QueryIntent
+
+`QueryIntent` is an optional best-effort LLM-derived structured hint with three fields:
+
+- `predicate`
+- `value`
+- `temporal_scope` (`current`, `historical`, or `any`)
+
+For example:
+
+```python
+memory.search(
+    user_id="user-123",
+    query="Where do I live?",
+)
+```
+
+can infer `predicate="location"` and `temporal_scope="current"`, allowing the structured branch to contribute relevant evidence without the application manually supplying `SearchFilters(predicate="location")`. Inference is not guaranteed, and unknown predicates simply add no inferred structure.
+
+If optional intent inference fails, search continues with the existing hard structured filters plus BM25 and FAISS. Set `infer_query_intent=False` on `search()` or `answer()` for lower latency or fully deterministic retrieval.
+
+## SearchFilters
+
+`SearchFilters` are explicit caller-supplied hard constraints. They apply to every retrieval branch. `QueryIntent` is inferred soft structured evidence only: it never becomes a filter and never constrains BM25 or FAISS. Memory Layer does not infer semantic or episodic memory type on reads.
+
+## Benchmarks
+
+Internal baseline comparison under the same evaluation protocol:
+
+| Metric | Internal baseline | meminfra 0.2.0 candidate |
 | --- | ---: | ---: |
-| Hit@5 | 0.457 | 0.686 |
-| Recall@5 | 0.426 | 0.657 |
-| MRR | 0.376 | 0.595 |
+| Hit@5 | 0.457 | 0.657 |
+| Recall@5 | 0.426 | 0.618 |
+| MRR | 0.376 | 0.544 |
 
-LoCoMo · `conv-30` · 105 QA · same evaluation protocol.
+Protocol: LoCoMo · `conv-30` · 19 sessions · 369 turns · 105 QA · `k=5`.
 
-This is an internal baseline comparison, not a cross-system comparison against another memory product. Hit@5 measures whether relevant memory appears in the top five; Recall@5 measures how much gold evidence appears there; MRR measures how early the first relevant result appears. See [`evals/`](evals/) for the harnesses and adapters.
+Hit@5 means at least one relevant memory appears in the top five. Recall@5 is the fraction of relevant memories recovered in the top five. MRR measures how early the first relevant memory appears.
 
-## Configuration
+### QueryIntent engineering ablation
 
-Configure connections and providers with environment variables. Do not commit credentials.
+| Setting | Hit@5 | Recall@5 | MRR |
+| --- | ---: | ---: | ---: |
+| QueryIntent OFF | 0.657 | 0.618 | 0.544 |
+| QueryIntent ON | 0.657 | 0.618 | 0.544 |
 
-| Variable | Purpose |
-| --- | --- |
-| `DATABASE_URL` | PostgreSQL runtime connection |
-| `DIRECT_URL` | Direct PostgreSQL URL for migrations; takes precedence for `meminfra migrate` |
-| `LLM_PROVIDER` | LLM provider (`openai`, `openrouter`, or `openai_compatible`) |
-| `LLM_API_KEY` | LLM provider credential |
-| `LLM_BASE_URL` | Optional custom/OpenAI-compatible LLM endpoint |
-| `LLM_MODEL` | LLM model used for extraction, summaries, and answers |
-| `EMBEDDING_PROVIDER` | Embedding provider |
-| `EMBEDDING_API_KEY` | Embedding provider credential |
-| `EMBEDDING_BASE_URL` | Optional custom/OpenAI-compatible embedding endpoint |
-| `EMBEDDING_MODEL` | Embedding model |
-| `FAISS_INDEX_DIR` | Local directory for derived FAISS indexes |
+Across 105 questions, 105/105 intent calls validated; 3/105 returned controlled predicates, 1/105 included a value, and 1/105 activated structured retrieval. LoCoMo `conv-30` has little overlap with the current controlled ontology, so this dataset does not meaningfully demonstrate the value of QueryIntent. It does not imply a metric gain or a feature failure.
 
-Minimal example:
+### Write-path diagnostic ablation
 
-```env
-DATABASE_URL=postgresql+psycopg://user:password@host/database
-LLM_PROVIDER=openai
-LLM_API_KEY=your-llm-key
-LLM_MODEL=your-llm-model
-EMBEDDING_PROVIDER=openai
-EMBEDDING_API_KEY=your-embedding-key
-EMBEDDING_MODEL=text-embedding-3-small
-```
+| Setting | Hit@5 | Recall@5 | MRR | Sessions ingested | Extraction failures |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| OLD_WRITE | 0.524 | 0.499 | 0.462 | 14/19 | 5 |
+| CURRENT_WRITE | 0.629 | 0.589 | 0.502 | 19/19 | 0 |
 
-`LLM_BASE_URL` and `EMBEDDING_BASE_URL` are optional and are useful for custom or OpenAI-compatible endpoints.
-
-## Database setup
-
-Run migrations after configuring `DATABASE_URL` (or `DIRECT_URL` when the migration connection should differ):
-
-```bash
-meminfra migrate
-```
-
-This applies the packaged Alembic migrations to the configured PostgreSQL database. For repository development, `python -m alembic upgrade head` also works.
+The old-write side failed to ingest five sessions, so this experiment is diagnostic evidence rather than the primary public benchmark comparison.
 
 ## Public API
 
 `MemoryLayer` is the high-level facade:
 
 ```python
-MemoryLayer.add(user_id=..., conversation_id=..., messages=...)
-MemoryLayer.search(user_id=..., query=..., limit=10, filters=None)
-MemoryLayer.answer(user_id=..., query=..., limit=5, filters=None)
+MemoryLayer.add(*, user_id: str, conversation_id: str, messages: list[dict[str, str]]) -> AddResult
+MemoryLayer.search(*, user_id: str, query: str, limit: int = 10,
+                   filters: SearchFilters | None = None,
+                   infer_query_intent: bool = True) -> list[SearchHit]
+MemoryLayer.answer(*, user_id: str, query: str, limit: int = 5,
+                   filters: SearchFilters | None = None,
+                   infer_query_intent: bool = True) -> AnswerResult
 ```
 
-- `add` persists messages and extracts or updates durable memory.
-- `search` retrieves ranked memory for one user.
-- `answer` retrieves memory and produces a grounded answer.
+`answer()` retrieves once through `search()`, then asks the configured LLM to answer only from the retrieved memory. It abstains without an answer-generation call when no memory is found.
 
-The application remains responsible for deciding how retrieved memory is inserted into its final prompt or context.
+## Migrations and recovery
 
-## Architecture
+Run `meminfra migrate` after configuring `DATABASE_URL` (or `DIRECT_URL`). The command uses Alembic migrations packaged with the wheel and is safe to run repeatedly. The current schema head is `0005_structured_fact_uniqueness`.
 
-```mermaid
-flowchart TD
-    A[Conversation] --> B[Bounded extraction context]
-    B --> C[LLM extraction]
-    C --> D[Deterministic writer<br/>ADD / NOOP / SUPERSEDE]
-    D --> E[PostgreSQL]
-    E --> F[BM25 + FAISS]
-    F --> G[Discounted agreement fusion]
-    G --> H[Search or grounded answer]
-```
+PostgreSQL is recoverable durable state. If a local FAISS index is missing, stale, or corrupt, it is rebuilt from PostgreSQL.
 
-## Development
+## Development and testing
 
 ```bash
-pip install -e ".[dev]"
 python -m pytest
 python -m compileall -q src tests
+python -m build
+python -m twine check dist/*
 ```
 
-Database integration tests run only when `TEST_DATABASE_URL` is configured; they never fall back to `DATABASE_URL`. The core memory, retrieval, CLI, and package paths are covered by automated tests.
+Database integration tests run only when `TEST_DATABASE_URL` is configured; they never fall back to `DATABASE_URL`. Evaluation workloads use `EVAL_DATABASE_URL` and are not part of the normal test suite.
 
 ## License
 

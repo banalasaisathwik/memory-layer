@@ -42,7 +42,7 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           "$RUNNER_TEMP/meminfra-release-wheel/bin/python" -c "from meminfra import MemoryLayer; print(MemoryLayer)"
-          "$RUNNER_TEMP/meminfra-release-wheel/bin/python" -c "from importlib.metadata import version; assert version('meminfra') == '0.1.0'"
+          "$RUNNER_TEMP/meminfra-release-wheel/bin/python" -c "from importlib.metadata import version; assert version('meminfra') == '0.2.0'"
           "$RUNNER_TEMP/meminfra-release-wheel/bin/python" -m pip check
           "$RUNNER_TEMP/meminfra-release-wheel/bin/meminfra" --help
       - uses: actions/upload-artifact@v7
@@ -71,8 +71,8 @@ jobs:
       - name: Confirm release artifacts
         run: |
           set -euo pipefail
-          test "$(find dist -maxdepth 1 -type f -name 'meminfra-0.1.0-py3-none-any.whl' | wc -l)" -eq 1
-          test "$(find dist -maxdepth 1 -type f -name 'meminfra-0.1.0.tar.gz' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -type f -name 'meminfra-0.2.0-py3-none-any.whl' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -type f -name 'meminfra-0.2.0.tar.gz' | wc -l)" -eq 1
           test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
           find dist -maxdepth 1 -type f -printf '%f\n' | sort
       - uses: pypa/gh-action-pypi-publish@release/v1
@@ -97,8 +97,8 @@ jobs:
       - name: Confirm release artifacts
         run: |
           set -euo pipefail
-          test "$(find dist -maxdepth 1 -type f -name 'meminfra-0.1.0-py3-none-any.whl' | wc -l)" -eq 1
-          test "$(find dist -maxdepth 1 -type f -name 'meminfra-0.1.0.tar.gz' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -type f -name 'meminfra-0.2.0-py3-none-any.whl' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -type f -name 'meminfra-0.2.0.tar.gz' | wc -l)" -eq 1
           test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
           find dist -maxdepth 1 -type f -printf '%f\n' | sort
       - uses: pypa/gh-action-pypi-publish@release/v1
@@ -139,18 +139,18 @@ jobs:
             --no-cache-dir \
             --index-url https://test.pypi.org/simple/ \
             --dest "$RUNNER_TEMP/meminfra-testpypi-download" \
-            meminfra==0.1.0
-          test "$(find "$RUNNER_TEMP/meminfra-testpypi-download" -maxdepth 1 -type f -name 'meminfra-0.1.0-py3-none-any.whl' | wc -l)" -eq 1
+            meminfra==0.2.0
+          test "$(find "$RUNNER_TEMP/meminfra-testpypi-download" -maxdepth 1 -type f -name 'meminfra-0.2.0-py3-none-any.whl' | wc -l)" -eq 1
       - name: Install TestPyPI wheel with dependencies from PyPI
         run: |
           "$RUNNER_TEMP/meminfra-testpypi/bin/python" -m pip install --upgrade pip
           "$RUNNER_TEMP/meminfra-testpypi/bin/python" -m pip install \
-            "$RUNNER_TEMP/meminfra-testpypi-download/meminfra-0.1.0-py3-none-any.whl"
+            "$RUNNER_TEMP/meminfra-testpypi-download/meminfra-0.2.0-py3-none-any.whl"
       - name: Verify installed package
         working-directory: ${{ runner.temp }}
         run: |
           "$RUNNER_TEMP/meminfra-testpypi/bin/python" -c "from meminfra import MemoryLayer; print(MemoryLayer)"
-          "$RUNNER_TEMP/meminfra-testpypi/bin/python" -c "from importlib.metadata import metadata, version; assert version('meminfra') == '0.1.0'; assert metadata('meminfra')['Name'] == 'meminfra'"
+          "$RUNNER_TEMP/meminfra-testpypi/bin/python" -c "from importlib.metadata import metadata, version; assert version('meminfra') == '0.2.0'; assert metadata('meminfra')['Name'] == 'meminfra'"
           "$RUNNER_TEMP/meminfra-testpypi/bin/python" -m pip check
           "$RUNNER_TEMP/meminfra-testpypi/bin/meminfra" --help
       - name: Migrate disposable database from published package
@@ -194,7 +194,7 @@ jobs:
           set -euo pipefail
           "$RUNNER_TEMP/meminfra-pypi/bin/python" -m pip install --upgrade pip
           for attempt in 1 2 3 4 5; do
-            if "$RUNNER_TEMP/meminfra-pypi/bin/python" -m pip install --no-cache-dir --index-url https://pypi.org/simple/ meminfra==0.1.0; then
+            if "$RUNNER_TEMP/meminfra-pypi/bin/python" -m pip install --no-cache-dir --index-url https://pypi.org/simple/ meminfra==0.2.0; then
               exit 0
             fi
             if [ "$attempt" -eq 5 ]; then
@@ -206,7 +206,7 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           "$RUNNER_TEMP/meminfra-pypi/bin/python" -c "from meminfra import MemoryLayer; print(MemoryLayer)"
-          "$RUNNER_TEMP/meminfra-pypi/bin/python" -c "from importlib.metadata import metadata, version; assert version('meminfra') == '0.1.0'; assert metadata('meminfra')['Name'] == 'meminfra'"
+          "$RUNNER_TEMP/meminfra-pypi/bin/python" -c "from importlib.metadata import metadata, version; assert version('meminfra') == '0.2.0'; assert metadata('meminfra')['Name'] == 'meminfra'"
           "$RUNNER_TEMP/meminfra-pypi/bin/python" -m pip check
           "$RUNNER_TEMP/meminfra-pypi/bin/meminfra" --help
       - name: Migrate disposable database from published package

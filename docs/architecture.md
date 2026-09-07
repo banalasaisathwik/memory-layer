@@ -160,23 +160,21 @@ The LLM proposes `CandidateMemory`. Deterministic code owns user scope, conversa
 
 ## Hybrid memory retrieval
 
-`search_memories()` reads long-term memory without an LLM. Its public boundary requires `user_external_id`, resolves that user before any branch runs, and includes user scope in each PostgreSQL query. A supplied conversation filter must resolve to a conversation owned by that user. It restricts results to memories with that explicit `conversation_id`; user-level memories with `conversation_id = NULL` do not implicitly belong to every conversation.
+`search_memories()` resolves its user before any branch runs and includes user scope in each PostgreSQL query. A supplied conversation filter must resolve to a conversation owned by that user. It restricts results to memories with that explicit `conversation_id`; user-level memories with `conversation_id = NULL` do not implicitly belong to every conversation.
 
 ```text
-                         Memory PostgreSQL
-                               |
-          +--------------------+--------------------+
-          |                    |                    |
-   structured lookup      lexical FTS         FAISS vector
-          |                    |                    |
-          +--------------------+--------------------+
-                               |
-                  discounted rank agreement fusion
-                               |
-                         ranked results
+natural-language query -> QueryIntent (best effort) -> structured retrieval
+                    \-> original query -------------> BM25 lexical retrieval
+                    \-> original query -------------> FAISS vector retrieval
+                                                        |
+                  structured + BM25 + vector -> discounted-agreement fusion
+                                                        |
+                                                  SearchHit[]
 ```
 
-PostgreSQL is authoritative. It stores memory text, structure, temporal state, normalized embeddings, and the embedding model. The structured branch is activated only by known caller-supplied filters such as `fact_key`, `predicate`, `memory_type`, `subject_type`, or conversation. The lexical branch uses PostgreSQL `to_tsvector('simple', memory_text)`, `websearch_to_tsquery`, `ts_rank_cd`, and a GIN expression index. The `simple` configuration preserves technical vocabulary better than stemming configurations; a small literal substring fallback handles punctuation-heavy identifiers when FTS finds no match.
+PostgreSQL is authoritative. It stores memory text, structure, temporal state, normalized embeddings, and the embedding model. FAISS is rebuildable derived state, never the sole copy of a vector or identity. `SearchFilters` are caller-owned deterministic hard constraints: they apply to every branch. The structured branch also receives a small, probabilistic `QueryIntent` (`predicate`, `value`, `temporal_scope`) from the configured LLM. Its predicate is canonicalized through the same controlled registry as writing, and it can add lifecycle-aware exact structured evidence for a natural query such as `"Where do I live?"`. It is never converted into `SearchFilters`, and never changes the original query or filters supplied to lexical or FAISS retrieval. If intent extraction fails, only that optional structured contribution is omitted. `infer_query_intent=False` disables the enhancement for callers that prefer lower latency or fully deterministic retrieval. Reads do not infer semantic or episodic memory type.
+
+The lexical branch uses PostgreSQL `to_tsvector('simple', memory_text)`, `websearch_to_tsquery`, `ts_rank_cd`, and a GIN expression index. The `simple` configuration preserves technical vocabulary better than stemming configurations; a small literal substring fallback handles punctuation-heavy identifiers when FTS finds no match.
 
 FAISS is derived local search state, never the only copy of a vector or identity. Each V1 index belongs to exactly one user, not a conversation, and uses a SHA-256 user fingerprint rather than the raw external ID in its filenames. The persisted JSON metadata contains the fingerprint, embedding model, embedding dimension, and the position-to-memory-UUID list needed by `IndexFlatIP`. Candidate UUIDs are always resolved and state-filtered through PostgreSQL before they become results.
 
@@ -192,7 +190,7 @@ The branches have incompatible raw score scales (structured ordering, PostgreSQL
 
 - A local index per user may be inefficient at very large user counts.
 - Exact `IndexFlatIP` becomes expensive for very large per-user memory sets.
-- Structured filters are caller-supplied; natural-language structure inference is not implemented.
+- Query intent is an optional best-effort hint, not a semantic/episodic memory-type classifier or a hard filter.
 - Importance, recency, and branch behavior are not yet benchmark-calibrated.
 - Historical vectors can require oversampling before active-state filtering.
 - Cross-conversation raw-message semantic retrieval, global Message indexes, ANN variants, reranking, and query rewriting are intentionally deferred.
@@ -221,7 +219,7 @@ AddResult
 
 `update_conversation_summary()` is called once per `add()`, after every interaction in that call has been extracted and written, using the same trigger logic described above (`summary_trigger_messages`, `summary_recent_keep`) -- summary generation is not conditioned on whether a memory happened to be written. A `SummaryError` is caught at the facade boundary only: it is reported through `AddResult.warnings` (`"summary_update_failed"`) and `summary_updated = False` rather than raised, because `write_memories()` already committed its own batch per interaction and a downstream summary failure must not appear to undo that durable write. Every other failure -- message persistence, extraction, or the writer -- propagates as its existing typed error (a database error, `ExtractionError`, `WriteError`/`WriteConflictError`) rather than being swallowed.
 
-`MemoryLayer.search()` is a direct, unmodified call to `search_memories()`; the facade changes nothing about ranking, filters, or scoring. `MemoryLayer.answer()` calls `search()` and, only when it returns at least one hit, sends the retrieved memories to an LLM reader as a small locally-referenced list (`M0`, `M1`, ...) labeled active or historical, instructed to answer only from that evidence and to reply with the literal token `UNKNOWN` when it is insufficient. `supporting_memory_ids` is always the full retrieved set used as context, not an LLM-chosen subset, so the model is never asked to invent or select memory IDs. `add()`/`search()`/`answer()` add no semantic-quality behavior of their own -- no dedup, retraction, recency weighting, or reranking -- so the Smoke benchmark, driven directly through the underlying functions, remains a meaningful comparison.
+`MemoryLayer.search()` passes filters and the optional `infer_query_intent` switch through to `search_memories()`; the facade adds no separate retrieval work. `MemoryLayer.answer()` calls `search()` once, so it receives the same query-intent-aware results without a duplicate intent extraction. When search returns memories, answer sends them to an LLM reader as a small locally-referenced list (`M0`, `M1`, ...) labeled active or historical, instructed to answer only from that evidence and to reply with the literal token `UNKNOWN` when it is insufficient. `supporting_memory_ids` is always the full retrieved set used as context, not an LLM-chosen subset, so the model is never asked to invent or select memory IDs. `add()`/`search()`/`answer()` add no reranking or memory-type inference.
 
 ## Design principles
 

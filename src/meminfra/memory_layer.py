@@ -265,11 +265,19 @@ class MemoryLayer:
         query: str,
         limit: int = 10,
         filters: SearchFilters | None = None,
+        infer_query_intent: bool = True,
     ) -> list[SearchHit]:
         """Return raw memory search hits. A thin wrapper: ranking is unchanged."""
 
         user_id = _validate_scope_id(user_id, name="user_id")
-        return search_memories(self.db, query, user_external_id=user_id, limit=limit, filters=filters)
+        return search_memories(
+            self.db,
+            query,
+            user_external_id=user_id,
+            limit=limit,
+            filters=filters,
+            infer_query_intent=infer_query_intent,
+        )
 
     # -- grounded answering ------------------------------------------------
 
@@ -280,6 +288,7 @@ class MemoryLayer:
         query: str,
         limit: int = 5,
         filters: SearchFilters | None = None,
+        infer_query_intent: bool = True,
     ) -> AnswerResult:
         """Answer a question using only memories retrieved by :meth:`search`.
 
@@ -293,7 +302,13 @@ class MemoryLayer:
         """
 
         user_id = _validate_scope_id(user_id, name="user_id")
-        hits = self.search(user_id=user_id, query=query, limit=limit, filters=filters)
+        hits = self.search(
+            user_id=user_id,
+            query=query,
+            limit=limit,
+            filters=filters,
+            infer_query_intent=infer_query_intent,
+        )
         if not hits:
             return AnswerResult(
                 answer=_ABSTENTION_ANSWER,

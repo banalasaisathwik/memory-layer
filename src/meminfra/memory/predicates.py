@@ -29,6 +29,11 @@ PREDICATES: dict[str, dict[str, Cardinality]] = {
 PREDICATE_ALIASES = {
     "preferred_database": "database_preference",
     "db_preference": "database_preference",
+    "current_location": "location",
+    "current_city": "location",
+    "residence": "location",
+    "home_location": "location",
+    "lives_in": "location",
 }
 
 
@@ -55,3 +60,11 @@ def get_predicate_cardinality(name: str | None) -> Cardinality | None:
 
     predicate = resolve_predicate(name)
     return PREDICATES[predicate]["cardinality"] if predicate is not None else None
+
+
+def render_controlled_predicate_guidance() -> str:
+    """Render the canonical predicate vocabulary for the extraction prompt."""
+
+    lines = ["CONTROLLED PREDICATES", "The following predicate names are canonical:"]
+    lines.extend(f"- {name}: {definition['cardinality']}" for name, definition in PREDICATES.items())
+    return "\n".join(lines)

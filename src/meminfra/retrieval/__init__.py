@@ -26,7 +26,8 @@ from .fusion import (
     weighted_reciprocal_rank_fusion,
 )
 from .lexical import bm25_retrieve, lexical_retrieve
-from .schemas import SearchFilters, SearchHit
+from .query_intent import QueryIntentError, extract_query_intent
+from .schemas import QueryIntent, SearchFilters, SearchHit
 from .search import search_memories
 from .message_vector import (
     MessageIndexSyncStats,
@@ -73,6 +74,8 @@ __all__ = [
     "RRF_K",
     "RetrievalError",
     "SearchFilters",
+    "QueryIntent",
+    "QueryIntentError",
     "SearchHit",
     "UserNotFoundError",
     "bm25_rank",
@@ -90,6 +93,7 @@ __all__ = [
     "reset_memory_index_sync_stats",
     "reset_message_index_sync_stats",
     "search_memories",
+    "extract_query_intent",
     "retrieve_semantic_message_context",
     "sync_conversation_message_index",
     "sync_user_memory_index",
